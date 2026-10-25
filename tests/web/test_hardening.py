@@ -182,3 +182,35 @@ def test_oversized_login_email_capped(client):
     with client.app.state.runtime_holder.get().pool.connection() as c:
         n = c.execute("SELECT max(length(email)) AS n FROM login_attempts").fetchone()["n"]
     assert n is not None and n <= MAX_EMAIL_LENGTH
+
+
+_DEMO_EMAIL, _DEMO_PW = "demo@example.com", "demo-password-123"
+_EMAIL_VARIANTS = [
+    _DEMO_EMAIL,
+    "  " + _DEMO_EMAIL,
+    " " * (MAX_EMAIL_LENGTH - 5) + _DEMO_EMAIL,
+    " " * 300 + _DEMO_EMAIL,
+    "DEMO@Example.COM ",
+    "\t" + _DEMO_EMAIL + "\n",
+]
+
+
+def test_login_throttle_shared_across_email_variants(client, settings):
+    """Padding, whitespace and case variants of one email share a single failure budget (AC 4)."""
+    for i in range(settings.login_max_failures):
+        variant = _EMAIL_VARIANTS[i % len(_EMAIL_VARIANTS)]
+        r = client.post("/login", data={"email": variant, "password": "wrong-wrong-1"})
+        assert r.status_code == 400
+    for variant in _EMAIL_VARIANTS:
+        r = client.post("/login", data={"email": variant, "password": "wrong-wrong-1"})
+        assert r.status_code == 429, repr(variant[-30:])
+    r = client.post("/login", data={"email": " " * 250 + _DEMO_EMAIL, "password": _DEMO_PW})
+    assert r.status_code == 429
+    r = client.post("/login", data={"email": _DEMO_EMAIL, "password": _DEMO_PW})
+    assert r.status_code == 429
+
+
+def test_login_echoes_normalised_email(client):
+    """The re-rendered form echoes the normalised (trimmed, lower-cased) email."""
+    r = client.post("/login", data={"email": "  Demo@Example.com  ", "password": "wrong-wrong-1"})
+    assert r.status_code == 400 and 'value="demo@example.com"' in r.text
