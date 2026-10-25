@@ -28,8 +28,26 @@
   --radius-box: 0.875rem;
   --radius-field: 0.625rem;
   --radius-selector: 0.5rem;
+  /* DaisyUI 5 component tokens. A custom theme must define these itself: without --border,
+     `border: var(--border) solid ...` on .input/.select/.card is invalid and draws no border. */
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
 }
 @theme {
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-field-border: #CDD2D9;
+}
+/* Form fields: mockup grey border, teal (primary) focus ring. In the utilities layer so it wins
+   over DaisyUI's layered defaults; colour modifiers (input-error, ...) keep their own colour. */
+@layer utilities {
+  :is(.input, .select, .textarea):not([class*="input-"], [class*="select-"], [class*="textarea-"]) {
+    --input-color: var(--color-field-border);
+  }
+  :is(.input, .select, .textarea):not([class*="input-"], [class*="select-"], [class*="textarea-"]):is(:focus, :focus-within) {
+    --input-color: var(--color-primary);
+  }
 }
