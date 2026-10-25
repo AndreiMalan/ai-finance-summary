@@ -87,3 +87,12 @@ $ curl -N -s -i http://127.0.0.1:8765/_diag/sse   (left column: client-side arri
 [ 5.094s] data: {"elapsed": 5.063}
 ```
 On Vercel: `curl -N https://<deploy>/_diag/sse` — pass if ticks arrive ~1 s apart rather than all at ~5 s.
+
+
+## Live verification on Vercel preview (2026-10-26, commit 6a4ec94, region fra1)
+
+- **R2 SSE: VERIFIED.** `vercel curl <preview>/_diag/sse -N` delivered `tick` events incrementally at t=0,1,2,3,4 s and `done` at 5.0 s (byte count grew each second; no buffering).
+- **R3 setup on Neon: VERIFIED.** First request ran `bootstrap()` on `DATABASE_URL_UNPOOLED` (migrations + LangGraph checkpointer/store setup); `/healthz` → `{"ok":true,"db":true}` over the pooled `DATABASE_URL`.
+- **R3 interrupt/resume through the pooler: PENDING (M7)** — exercised by the real workflow.
+- Deploy fix: `"buildCommand": ""` in vercel.json forced the static builder (framework detection skipped, whole repo published as static files). Removed; `"framework": "fastapi"` + `functions["app.py"]` now produce a single `@vercel/python` function with `supportsResponseStreaming: true`.
+- Preview deployments are behind Vercel Authentication (use `vercel curl`).

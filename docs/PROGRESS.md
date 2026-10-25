@@ -9,12 +9,12 @@ This file is updated at **every** step transition (task dispatched, implemented,
 milestone: M1
 task: 7
 task_title: Vercel entrypoint, local dev DB, risk spikes R1/R2/R3
-phase: reviewing
+phase: fixing
 branch: m1-skeleton
 base_commit: f6c861e
-last_verified_commit: f6c861e
+last_verified_commit: 6a4ec94
 plan: docs/superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md
-next_action: Task 7 review (package excludes bookkeeping commits); then fix round if needed, preview deploy for R2/R3, merge to main.
+next_action: T7 small fix round (SSE duration cap, gate /_diag/sse outside prod, healthz statement_timeout, public CONN_KWARGS); then final whole-branch review; then merge m1-skeleton to main and verify production URL.
 updated: 2026-10-26
 ```
 
@@ -32,7 +32,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 ## Verified vs assumed (keep honest — the next session trusts this file)
 
 - **Verified** (by test run or command output): M1 Tasks 1–6 — full suite green at f6c861e (87 tests); Vercel env var names present (`vercel env ls`); Neon region fra1 (user-confirmed).
-- **Assumed / not yet verified**: SSE streams incrementally on Vercel (R2); PostgresSaver works through Neon (R3); bundle fits Vercel size limit (R1). Task 7 verifies these.
+- **Verified on Vercel preview (6a4ec94)**: R1 bundle 373 MB < 500 MB; R2 SSE incremental; R3 setup on Neon + healthz db=true.
+- **Assumed / not yet verified**: R3 interrupt/resume through Neon pooler (M7); demo login on production (needs merge).
 
 ## Suggested skills for the next session
 
