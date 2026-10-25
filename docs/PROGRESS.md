@@ -6,15 +6,15 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M1
-task: 7
-task_title: Vercel entrypoint, local dev DB, risk spikes R1/R2/R3
-phase: merging
-branch: m1-skeleton
-base_commit: f6c861e
-last_verified_commit: ad86e83
-plan: docs/superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md
-next_action: Verify production deploy of main (login page, healthz, demo login); run final whole-branch M1 review (parallel); then start M2 plan (docs/superpowers/plans/…-m2-…).
+milestone: M2
+task: 0
+task_title: Write M2 implementation plan (schema + file ingestion + chunked uploads to private Blob)
+phase: planning
+branch: main
+base_commit: 52c5234
+last_verified_commit: 52c5234
+plan: (to be written) docs/superpowers/plans/2026-10-26-m2-ingestion.md
+next_action: Write the M2 plan from docs/architecture.md §7 (M2 tasks), spec AC 9-19, decisions D-020/D-021; then create branch m2-ingestion and execute with subagent-driven-development. Pending in parallel: final M1 whole-branch review + QA (fix findings on main); user to lengthen DEMO_USER_PASSWORD in Vercel (healthz shows demo_user misconfigured).
 updated: 2026-10-26
 ```
 
@@ -48,7 +48,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | Milestone | Status |
 |---|---|
 | M1 Skeleton, auth, limits, Vercel | ✅ all 7 tasks; merged to main |
-| M2–M9 | ⬜ not started |
+| M2 Schema + ingestion | 🔄 planning |
+| M3–M9 | ⬜ not started |
 
 ## Completed tasks (append-only)
 
@@ -70,4 +71,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | Vercel project ai-finance-summary (https://ai-finance-summary.vercel.app) | ✅ linked locally (`vercel link`) |
 | Neon Postgres (fra1) with DATABASE_URL / DATABASE_URL_UNPOOLED | ✅ |
 | Vercel env: SESSION_SECRET, APP_ENV, DEMO_USER_EMAIL, DEMO_USER_PASSWORD | ✅ (Production; SESSION_SECRET also Preview) |
+| Vercel Blob store (private, OIDC: BLOB_STORE_ID) | ✅ Production + Preview |
+| Production deploy | ✅ https://ai-finance-summary.vercel.app (M1) |
+| DEMO_USER_PASSWORD ≥ 10 chars | ⬜ user to fix in Vercel |
 | OpenAI API key | ⬜ needed at M6 |
