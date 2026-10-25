@@ -1,4 +1,3 @@
-.env
 .venv/
 __pycache__/
 *.pyc
@@ -11,3 +10,9 @@ local_blobs/
 *.toc
 *.fls
 *.fdb_latexmk
+.superpowers/
+node_modules/
+.devdb/
+# env files (incl. .env.local from `vercel link`); keep the tracked template
+.env*
+!.env.example

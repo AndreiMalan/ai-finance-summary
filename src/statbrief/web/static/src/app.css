@@ -1,0 +1,53 @@
+@import "tailwindcss";
+@source "../../templates";
+@plugin "daisyui" { themes: false; }
+@plugin "daisyui/theme" {
+  name: "statbrief";
+  default: true;
+  color-scheme: light;
+  --color-base-100: #FFFFFF;
+  --color-base-200: #F6F7F9;
+  --color-base-300: #E3E6EB;
+  --color-base-content: #14181F;
+  --color-primary: #0F6E6A;
+  --color-primary-content: #FFFFFF;
+  --color-secondary: #3A5BA0;
+  --color-secondary-content: #FFFFFF;
+  --color-accent: #C26A1E;
+  --color-accent-content: #FFFFFF;
+  --color-neutral: #14181F;
+  --color-neutral-content: #FFFFFF;
+  --color-info: #3A5BA0;
+  --color-info-content: #FFFFFF;
+  --color-success: #1F7A3A;
+  --color-success-content: #FFFFFF;
+  --color-warning: #9A5B00;
+  --color-warning-content: #FFFFFF;
+  --color-error: #B42318;
+  --color-error-content: #FFFFFF;
+  --radius-box: 0.875rem;
+  --radius-field: 0.625rem;
+  --radius-selector: 0.5rem;
+  /* DaisyUI 5 component tokens. A custom theme must define these itself: without --border,
+     `border: var(--border) solid ...` on .input/.select/.card is invalid and draws no border. */
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-field-border: #CDD2D9;
+}
+/* Form fields: mockup grey border, teal (primary) focus ring. In the utilities layer so it wins
+   over DaisyUI's layered defaults; colour modifiers (input-error, ...) keep their own colour. */
+@layer utilities {
+  :is(.input, .select, .textarea):not([class*="input-"], [class*="select-"], [class*="textarea-"]) {
+    --input-color: var(--color-field-border);
+  }
+  :is(.input, .select, .textarea):not([class*="input-"], [class*="select-"], [class*="textarea-"]):is(:focus, :focus-within) {
+    --input-color: var(--color-primary);
+  }
+}

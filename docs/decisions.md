@@ -53,3 +53,25 @@ Rationale: WeasyPrint/headless-browser rendering unavailable on Vercel.
 
 ## D-015 — Build process
 2026-10-25 · Phase 0 (spec, decisions, brainstorm, architecture, UI mockup) → user approval → 9 milestones each Developer → Review (≥8/10) → QA, TDD, Opus subagents, fake LLMs in tests → Retro.
+
+## D-016 — Empty environment values mean "unset"
+2026-10-25 · `Settings` uses `env_ignore_empty=True`: a blank line such as `DEMO_USER_PASSWORD=` behaves as if the variable were absent (default or "required" error), never as an empty secret.
+Rationale: `.env.example` ships blank placeholders; treating them as empty strings would create a demo user with an empty password.
+
+## D-017 — Stateless signed session cookies (no server-side session table)
+2026-10-26 · Sessions are itsdangerous-signed cookies holding only the user id and a remember flag. "Remember me" tokens are valid for `SESSION_MAX_AGE_DAYS` (30); other tokens for `SESSION_SHORT_MAX_AGE_HOURS` (12), enforced server-side. Logout clears the cookie but cannot revoke a copied token before it expires; rotating `SESSION_SECRET` logs everyone out.
+Rationale: no extra table or lookup per request on serverless; acceptable for a demo app. Revocable server-side sessions can be added later (sessions table keyed by a random id) without changing callers of `issue_session/read_session`.
+
+## D-018 — CSRF and proxy-header trust
+2026-10-26 · M1 relies on `SameSite=Lax` session cookies (blocks cookie-bearing cross-site POSTs). Synchronizer CSRF tokens on all state-changing forms (including login, to stop login-CSRF) are added in M8 together with the report forms. `client_ip` trusts `X-Forwarded-For`, which is correct behind Vercel (the platform overwrites it); a `TRUST_PROXY_HEADERS` switch is added if the app is ever exposed without a proxy.
+
+## D-019 — Vercel packaging: root `app.py`, deps in `pyproject.toml`, region `fra1`
+2026-10-26 · Root `app.py` exposes the ASGI `app` (adds `src/` to `sys.path`; the package is not pip-installed on Vercel). `pyproject.toml` `[project].dependencies` mirrors `requirements.txt` exactly (test-enforced) because Vercel's uv-based builder installs from `pyproject.toml` when present. `vercel.json`: `regions: ["fra1"]` (same region as Neon), `functions."app.py".maxDuration = 300` (Hobby maximum). Bundle budget is Vercel's documented 500 MB Python limit; R1 measured 373 MB. Details and doc links: `docs/spikes.md`.
+
+## D-020 — Uploads go directly from the browser to Vercel Blob
+2026-10-26 · Vercel functions reject request bodies over 4.5 MB, so files are not uploaded through the FastAPI function. The browser uploads straight to private Vercel Blob using a short-lived client token issued by an authenticated app endpoint (scoped to the user and report, size-capped at `MAX_UPLOAD_MB`); the app then reads the blob server-side for sniffing/validation. Local dev/tests keep a direct multipart path. Planned in M2.
+Rationale: keeps the agreed 10 MB file limit (D-004/AC 9) without hitting the platform limit; also avoids holding large bodies in function memory.
+
+## D-021 — Chunked uploads through the app, stored with the official Python Blob SDK (supersedes D-020's mechanism)
+2026-10-26 · The browser sends each file in chunks of ≤ 4 MB (`UPLOAD_CHUNK_MB`, below Vercel's 4.5 MB body limit) to an authenticated, user-scoped endpoint; chunks are staged in Postgres, and when the last chunk arrives the server reassembles, sniffs and validates the file, then stores it in the **private** Blob store with `vercel.blob.put_blob(..., access="private")` (package `vercel-blob` ≥ 0.5.0; auth via `BLOB_STORE_ID` + Vercel OIDC, no static token). Downloads stream server-side with `stream_blob` after an ownership check. Local dev/tests use `LocalBlobStore` (filesystem) behind the same `BlobStore` protocol.
+Rationale: the Python SDK supports private put/get/delete with OIDC but not client uploads or signed URLs (Vercel docs, Python SDK reference); chunking keeps the agreed 10 MB limit with only documented APIs and no Node function.

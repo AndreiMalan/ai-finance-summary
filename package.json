@@ -1,0 +1,16 @@
+{
+  "name": "statbrief-assets",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i src/statbrief/web/static/src/app.css -o src/statbrief/web/static/app.css --minify",
+    "vendor": "node -e \"const f=require('fs');f.mkdirSync('src/statbrief/web/static/vendor',{recursive:true});f.copyFileSync('node_modules/htmx.org/dist/htmx.min.js','src/statbrief/web/static/vendor/htmx.min.js');f.copyFileSync('node_modules/alpinejs/dist/cdn.min.js','src/statbrief/web/static/vendor/alpine.min.js')\"",
+    "build": "npm run vendor && npm run build:css"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "tailwindcss": "4.3.3",
+    "daisyui": "5.7.50",
+    "htmx.org": "2.0.11",
+    "alpinejs": "3.17.5"
+  }
+}

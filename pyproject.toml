@@ -1,0 +1,32 @@
+[project]
+name = "statbrief"
+version = "0.1.0"
+requires-python = ">=3.12"
+# Runtime dependencies. MUST mirror requirements.txt exactly (enforced by tests/unit/test_packaging.py):
+# Vercel's uv-based Python builder installs from pyproject.toml when present, so an empty list
+# here would deploy with no dependencies at all. requirements.txt stays for pip/local dev.
+dependencies = [
+    "fastapi==0.162.0",
+    "jinja2==3.1.6",
+    "python-multipart==0.0.32",
+    "pydantic-settings==2.16.1",
+    "itsdangerous==2.2.0",
+    "argon2-cffi==25.1.0",
+    "psycopg[binary]==3.3.6",
+    "psycopg-pool==3.3.3",
+    "httpx==0.28.1",
+    "langgraph==1.2.17",
+    "langgraph-checkpoint-postgres==3.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+statbrief = ["storage/migrations/*.sql", "web/templates/*.html", "web/static/**/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
