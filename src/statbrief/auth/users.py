@@ -11,6 +11,7 @@ from statbrief.auth.passwords import hash_password, verify_password
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # RFC 5321 limits a forward-path to 256 octets incl. angle brackets, i.e. 254 for the address.
 _MAX_EMAIL_LENGTH = 254
+MAX_EMAIL_LENGTH = _MAX_EMAIL_LENGTH  # public alias for callers that must cap email input
 # Verified against when the email is unknown, so timing does not reveal which emails exist.
 _DUMMY_HASH = hash_password("timing-equaliser-not-a-real-password")
 

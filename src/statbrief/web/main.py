@@ -1,8 +1,10 @@
 """FastAPI application factory."""
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
+import psycopg
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from statbrief.config import Settings, get_settings
 from statbrief.web.deps import LoginRequired, get_runtime
 from statbrief.web.runtime import RuntimeHolder
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -36,10 +40,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz(request: Request) -> JSONResponse:
-        """Liveness + database check."""
-        with get_runtime(request).pool.connection() as c:
-            ok = c.execute("SELECT 1 AS one").fetchone()["one"] == 1
-        return JSONResponse({"ok": True, "db": ok})
+        """Liveness + database check; 503 when the database is unreachable."""
+        try:
+            with get_runtime(request).pool.connection() as c:
+                ok = c.execute("SELECT 1 AS one").fetchone()["one"] == 1
+        except psycopg.Error as exc:  # psycopg_pool errors (PoolTimeout, PoolClosed) subclass this
+            # Log only the exception class: messages can echo connection details.
+            logger.warning("healthz database check failed: %s", type(exc).__name__)
+            ok = False
+        return JSONResponse({"ok": ok, "db": ok}, status_code=200 if ok else 503)
 
     from statbrief.web.routes import auth, diag, pages
 

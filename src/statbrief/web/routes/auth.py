@@ -7,7 +7,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from statbrief.auth.limits import login_allowed, record_login
 from statbrief.auth.sessions import clear_session, issue_session
-from statbrief.auth.users import EmailTaken, InvalidEmail, WeakPassword, authenticate, create_user
+from statbrief.auth.users import (MAX_EMAIL_LENGTH, EmailTaken, InvalidEmail, WeakPassword, authenticate,
+                                  create_user)
 from statbrief.web.deps import client_ip, get_runtime, optional_user, templates
 from statbrief.web.runtime import Runtime
 
@@ -15,9 +16,19 @@ router = APIRouter()
 _HOME = "/reports"
 
 
+def _has_control_char(value: str) -> bool:
+    """True if `value` contains an ASCII control character (browsers strip tabs/newlines in URLs)."""
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value)
+
+
 def _safe_next(next_url: str | None) -> str:
-    """Only allow same-site relative redirects after login."""
-    if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+    """Only allow same-site relative redirects after login.
+
+    Rejects protocol-relative forms (two slashes, or slash + backslash, which browsers treat
+    alike) and any control character, since browsers drop e.g. a tab after the first slash.
+    """
+    if (next_url and next_url.startswith("/") and next_url[1:2] not in ("/", "\\")
+            and not _has_control_char(next_url)):
         return next_url
     return _HOME
 
@@ -38,12 +49,15 @@ def login(request: Request, rt: Annotated[Runtime, Depends(get_runtime)],
           remember: Annotated[str | None, Form()] = None, next: Annotated[str, Form()] = ""):
     """Authenticate with throttling; set the session cookie on success."""
     s, ip, now = rt.settings, client_ip(request), datetime.now(timezone.utc)
-    ctx = {"next": next, "email": email, "signups_enabled": s.signups_enabled}
-    if not login_allowed(rt.pool, email, ip, now, s.login_max_failures, timedelta(minutes=s.login_window_minutes)):
+    # Throttle key and stored/echoed value are capped so oversized input is never kept verbatim;
+    # authenticate() still sees the raw value and rejects anything over the limit.
+    email_key = email[:MAX_EMAIL_LENGTH]
+    ctx = {"next": next, "email": email_key, "signups_enabled": s.signups_enabled}
+    if not login_allowed(rt.pool, email_key, ip, now, s.login_max_failures, timedelta(minutes=s.login_window_minutes)):
         ctx["error"] = f"Too many failed attempts. Try again in {s.login_window_minutes} minutes."
         return templates.TemplateResponse(request, "login.html", ctx, status_code=429)
     user = authenticate(rt.pool, email, password, s.password_max_length)
-    record_login(rt.pool, email, ip, user is not None, now)
+    record_login(rt.pool, email_key, ip, user is not None, now)
     if user is None:
         ctx["error"] = "Incorrect email or password."
         return templates.TemplateResponse(request, "login.html", ctx, status_code=400)

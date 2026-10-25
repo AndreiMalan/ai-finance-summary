@@ -38,9 +38,14 @@ class RuntimeHolder:
                     bootstrap(self._settings)
                     pool = create_pool(self._settings)
                     s = self._settings
-                    if s.demo_user_email and s.demo_user_password:
-                        upsert_demo_user(pool, s.demo_user_email, s.demo_user_password.get_secret_value(),
-                                         s.password_min_length)
+                    try:
+                        if s.demo_user_email and s.demo_user_password:
+                            upsert_demo_user(pool, s.demo_user_email, s.demo_user_password.get_secret_value(),
+                                             s.password_min_length)
+                    except BaseException:
+                        # Fail loudly (misconfigured demo account) but never leak the pool on retries.
+                        pool.close()
+                        raise
                     self._runtime = Runtime(settings=s, pool=pool)
         return self._runtime
 

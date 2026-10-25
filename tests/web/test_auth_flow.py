@@ -62,10 +62,10 @@ def test_signups_disabled(settings):
         assert c.post("/signup", data={"email": "x@example.com", "password": "long-enough-pw"}).status_code == 404
 
 
-def test_signup_validation_errors(client):
+def test_signup_validation_errors(client, settings):
     """Weak password and duplicate email re-render the form with a message."""
     r = client.post("/signup", data={"email": "c@example.com", "password": "short"})
-    assert r.status_code == 400 and "at least 10 characters" in r.text
+    assert r.status_code == 400 and f"at least {settings.password_min_length} characters" in r.text
     client.post("/signup", data={"email": "d@example.com", "password": "long-enough-pw"})
     client.post("/logout")
     r = client.post("/signup", data={"email": "d@example.com", "password": "long-enough-pw"})
