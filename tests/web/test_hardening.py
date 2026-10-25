@@ -96,17 +96,22 @@ def test_login_page_when_logged_in_redirects(client):
     assert r.status_code == 303 and r.headers["location"] == "/reports"
 
 
-def test_healthz_db_failure(client, monkeypatch):
-    """A failing database check yields 503 with db false."""
-    rt = client.app.state.runtime_holder.get()
+def test_healthz_db_failure(settings, monkeypatch):
+    """A failing database check yields 503 with db false, waiting only HEALTHZ_DB_TIMEOUT_S."""
+    custom = settings.model_copy(update={"healthz_db_timeout_s": 1.25})
+    with TestClient(create_app(custom), follow_redirects=False) as client:
+        rt = client.app.state.runtime_holder.get()
+        seen_kwargs = []
 
-    def broken_connection(*_a, **_kw):
-        """Simulate an unreachable database."""
-        raise psycopg.OperationalError("connection refused")
+        def broken_connection(*_a, **kw):
+            """Simulate an unreachable database and record the kwargs used."""
+            seen_kwargs.append(kw)
+            raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(rt.pool, "connection", broken_connection)
-    r = client.get("/healthz")
+        monkeypatch.setattr(rt.pool, "connection", broken_connection)
+        r = client.get("/healthz")
     assert r.status_code == 503 and r.json() == {"ok": False, "db": False}
+    assert seen_kwargs == [{"timeout": 1.25}]
 
 
 def test_oversized_login_email_capped(client):

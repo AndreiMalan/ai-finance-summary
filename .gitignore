@@ -13,3 +13,9 @@ local_blobs/
 *.fdb_latexmk
 .superpowers/
 node_modules/
+.devdb/
+
+.vercel
+.env*
+# tracked template of env vars (the .env* rule above would hide new copies)
+!.env.example

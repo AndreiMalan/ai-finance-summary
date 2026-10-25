@@ -64,3 +64,6 @@ Rationale: no extra table or lookup per request on serverless; acceptable for a 
 
 ## D-018 — CSRF and proxy-header trust
 2026-10-26 · M1 relies on `SameSite=Lax` session cookies (blocks cookie-bearing cross-site POSTs). Synchronizer CSRF tokens on all state-changing forms (including login, to stop login-CSRF) are added in M8 together with the report forms. `client_ip` trusts `X-Forwarded-For`, which is correct behind Vercel (the platform overwrites it); a `TRUST_PROXY_HEADERS` switch is added if the app is ever exposed without a proxy.
+
+## D-019 — Vercel packaging: root `app.py`, deps in `pyproject.toml`, region `fra1`
+2026-10-26 · Root `app.py` exposes the ASGI `app` (adds `src/` to `sys.path`; the package is not pip-installed on Vercel). `pyproject.toml` `[project].dependencies` mirrors `requirements.txt` exactly (test-enforced) because Vercel's uv-based builder installs from `pyproject.toml` when present. `vercel.json`: `regions: ["fra1"]` (same region as Neon), `functions."app.py".maxDuration = 300` (Hobby maximum). Bundle budget is Vercel's documented 500 MB Python limit; R1 measured 373 MB. Details and doc links: `docs/spikes.md`.

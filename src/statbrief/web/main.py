@@ -42,7 +42,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def healthz(request: Request) -> JSONResponse:
         """Liveness + database check; 503 when the database is unreachable."""
         try:
-            with get_runtime(request).pool.connection() as c:
+            rt = get_runtime(request)
+            with rt.pool.connection(timeout=rt.settings.healthz_db_timeout_s) as c:
                 ok = c.execute("SELECT 1 AS one").fetchone()["one"] == 1
         except psycopg.Error as exc:  # psycopg_pool errors (PoolTimeout, PoolClosed) subclass this
             # Log only the exception class: messages can echo connection details.

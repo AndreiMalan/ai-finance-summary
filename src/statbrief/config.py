@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     db_pool_min: int = Field(1, ge=0)
     db_pool_max: int = Field(5, ge=1)
     db_setup_lock_timeout_s: float = Field(60.0, gt=0)
+    healthz_db_timeout_s: float = Field(3.0, gt=0)
 
     signups_enabled: bool = True
     demo_user_email: str | None = None
@@ -37,6 +38,9 @@ class Settings(BaseSettings):
     max_files_per_report: int = Field(5, ge=1)
 
     cron_secret: SecretStr = SecretStr("")
+
+    sse_diag_ticks: int = Field(5, ge=1, le=60)
+    sse_diag_interval_s: float = Field(1.0, ge=0.0, le=10.0)
 
     @field_validator("session_secret")
     @classmethod
