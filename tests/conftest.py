@@ -8,6 +8,17 @@ import pytest
 from statbrief.config import Settings
 
 
+@pytest.fixture(autouse=True)
+def _clean_settings_env(monkeypatch):
+    """Remove every Settings env var for every test so the developer's shell can't leak in.
+
+    E.g. DATABASE_URL_UNPOOLED left over from `vercel env pull` would otherwise make DB tests
+    bootstrap against Neon. Names are derived from Settings.model_fields, so new fields are covered.
+    """
+    for field in Settings.model_fields:
+        monkeypatch.delenv(field.upper(), raising=False)
+
+
 @pytest.fixture(scope="session")
 def pg_server():
     """Start one embedded PostgreSQL (with pgvector) for the whole test session."""
@@ -37,6 +48,7 @@ def settings(db_url) -> Settings:
     return Settings(
         app_env="test",
         database_url=db_url,
+        database_url_unpooled=None,  # explicit: tests never bootstrap through another URL
         session_secret="test-secret-" + "x" * 32,
         demo_user_email="demo@example.com",
         demo_user_password="demo-password-123",

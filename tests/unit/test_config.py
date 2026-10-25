@@ -4,12 +4,7 @@ from pydantic import ValidationError
 
 from statbrief.config import Settings
 
-
-@pytest.fixture(autouse=True)
-def _clean_settings_env(monkeypatch):
-    """Remove every Settings env var so the developer's shell can't leak into tests."""
-    for field in Settings.model_fields:
-        monkeypatch.delenv(field.upper(), raising=False)
+# The autouse env-clearing fixture now lives in tests/conftest.py so it covers every test.
 
 
 def test_defaults_match_spec():
