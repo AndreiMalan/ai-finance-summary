@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.vercel/
+local_blobs/
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk

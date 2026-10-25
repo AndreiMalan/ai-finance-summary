@@ -1,0 +1,282 @@
+# Architecture — StatBrief
+
+Architect Agent output. Approach: **segmented in-request streaming** ([brainstorm.md](brainstorm.md), Approach 1). Requirements: [spec.md](spec.md) (AC-n = acceptance criterion n). Decisions: [decisions.md](decisions.md).
+
+Pinned stack (latest at 2026-10-25): Python 3.12 · FastAPI 0.162 · langgraph 1.2 · langgraph-checkpoint-postgres 3.2 · langchain 1.4 / core 1.7 · langchain-openai 1.7 · langchain-postgres 0.0.19 · langchain-community 0.4 · langchain-text-splitters 1.1 · pandas 3.1 · openpyxl 3.1 · xlrd 2.0 · reportlab 5.1 · psycopg 3.3 · argon2-cffi 25.1 · pypdf 6.
+
+---
+
+## 1. File and module structure
+
+```
+AI_Finance_summary/
+├── app.py                      # Vercel entrypoint: `from statbrief.web.main import app`
+├── vercel.json                 # crons (cleanup), function maxDuration, includeFiles
+├── pyproject.toml / requirements.txt
+├── .env.example
+├── src/statbrief/
+│   ├── config.py               # Settings (pydantic-settings) — every tunable from env
+│   ├── domain/                 # Pydantic contracts between stages (no I/O)
+│   │   ├── observation.py      # Observation, Provenance (UploadProvenance | ApiProvenance)
+│   │   ├── dataset.py          # DatasetRef, ColumnMapping, DetectedSchema, ValidationIssue, ValidationReport
+│   │   ├── conflict.py         # Conflict, ConflictResolution
+│   │   ├── metrics.py          # MetricResult, MetricSkip, SignificantChange
+│   │   ├── report.py           # ReportParams, ReportDraft, Finding, Section, NumericalClaim, Citation
+│   │   ├── review.py           # ReviewDecision, VerificationResult, ClaimCheck
+│   │   └── preferences.py      # UserPreferences
+│   ├── ingest/
+│   │   ├── sniff.py            # validate_file_bytes(): extension + magic bytes + size, reject xlsm/encrypted
+│   │   ├── readers.py          # read_csv / read_excel / read_json -> RawTable (+ row numbers)
+│   │   ├── detect.py           # detect_schema(RawTable) -> DetectedSchema (header row, roles, date fmt, confidence)
+│   │   ├── validate.py         # validate_table(RawTable, ColumnMapping) -> ValidationReport
+│   │   ├── normalize.py        # to_observations(RawTable, ColumnMapping, ...) -> list[Observation]
+│   │   ├── regions.py          # region name/code resolution (ISO2, NUTS, Eurostat EL/UK aliases)
+│   │   ├── periods.py          # parse_period() for 2024M03, 2024-Q1, Excel serials, ambiguity detection
+│   │   ├── template.py         # build_template_xlsx()/csv
+│   │   └── apis/
+│   │       ├── base.py         # ApiClient protocol, retry/backoff, timeout, ApiError
+│   │       ├── eurostat.py     # JSON-stat 2.0 -> Observations (+ status flags)
+│   │       ├── worldbank.py    # v2 JSON (paginated) -> Observations
+│   │       └── catalog.py      # curated IndicatorSpec list (D-005)
+│   ├── analytics/
+│   │   ├── combine.py          # merge datasets, detect_conflicts(), apply_resolutions()
+│   │   ├── metrics.py          # compute_metrics(), compute_metric(metric_id) — pandas only
+│   │   ├── significance.py     # flag_significant()
+│   │   └── verify.py           # verify_draft(ReportDraft, ObservationStore) -> VerificationResult
+│   ├── rag/
+│   │   ├── loaders.py          # load_reference(path|bytes) -> list[Document] (PyPDF/Text/Markdown loaders)
+│   │   ├── indexer.py          # split + embed + upsert into PGVector with metadata
+│   │   ├── retriever.py        # retrieve(query, user_id, k) -> list[RetrievedPassage]; FTS fallback
+│   │   └── api_metadata.py     # API metadata -> Documents (genuine, cited by URL)
+│   ├── llm/
+│   │   ├── models.py           # get_chat_model(), get_embeddings() via init_chat_model / env
+│   │   ├── prompts.py          # ChatPromptTemplates: draft, interpret_dataset, revise, review_revise
+│   │   ├── chains.py           # LCEL: context_prep_chain, draft_chain, revise_chain (with_structured_output)
+│   │   ├── tools.py            # @tool get_indicator_metadata, list_available_metrics, query_observations, compute_metric
+│   │   └── callbacks.py        # RunEventsCallbackHandler (redacting) -> run_events
+│   ├── graph/
+│   │   ├── state.py            # ReportState TypedDict + reducers; sub-states
+│   │   ├── ingestion.py        # ingestion subgraph (Send per source)
+│   │   ├── retrieval.py        # retrieval subgraph
+│   │   ├── drafting.py         # drafting subgraph (draft -> verify -> revise loop)
+│   │   ├── nodes.py            # top-level nodes (select_sources, normalize, resolve_gate, analyze, review, export, fail)
+│   │   ├── routing.py          # all conditional-edge functions (pure, unit-tested)
+│   │   ├── builder.py          # build_graph(checkpointer, store) -> CompiledStateGraph
+│   │   └── runner.py           # run_segment(): stream with time budget, lock, events -> SSE
+│   ├── storage/
+│   │   ├── db.py               # psycopg pool (Neon pooled URL), migrations runner
+│   │   ├── migrations/*.sql    # users, reports, files, observations, run_events, rate_limits, report_versions
+│   │   ├── repos.py            # ReportRepo, FileRepo, ObservationRepo, VersionRepo (all user-scoped)
+│   │   ├── blobs.py            # BlobStore protocol: VercelBlobStore | PostgresBlobStore | LocalBlobStore
+│   │   └── retention.py        # cleanup_expired()
+│   ├── auth/
+│   │   ├── passwords.py        # hash/verify (argon2)
+│   │   ├── sessions.py         # signed cookie (itsdangerous), current_user dependency
+│   │   └── limits.py           # rate limits + daily LLM cap (Postgres counters)
+│   ├── export/
+│   │   ├── pdf.py              # build_pdf(ReportBundle) -> bytes (reportlab + graphics charts)
+│   │   └── excel.py            # build_xlsx(ReportBundle) -> bytes (values only, formula-escape)
+│   └── web/
+│       ├── main.py             # FastAPI app, startup (migrations, demo user), routers
+│       ├── routes/             # auth.py, reports.py (wizard), uploads.py, run.py (SSE), review.py, history.py, diagnostics.py, prefs.py, cron.py
+│       ├── templates/          # Jinja: base, wizard steps, partials (timeline, grid, issues, conflicts, review, history)
+│       └── static/             # app.css (Tailwind build), app.js (Alpine helpers), vendor via CDN
+├── knowledge_base/             # 9 ESMB/IRS reference docs (PDF/MD/TXT) + build script for PDFs
+├── sample_data/                # IRS_regional_monthly.xlsx, company_sector.csv, irs_api_export.json, cryptic_columns.csv
+├── scripts/                    # index_knowledge_base.py, make_sample_data.py, reset_demo.py, admin_reset_password.py
+├── tests/                      # unit/ (pure), graph/ (MemorySaver + fakes), integration/ (Postgres, opt-in), live/ (OPENAI key)
+└── docs/                       # spec, decisions, brainstorm, architecture, concepts/concepts.tex (local only)
+```
+
+Layering rule: `domain` imports nothing internal; `ingest/analytics/rag/llm` import `domain`; `graph` imports all of those; `web` imports `graph`, `storage`, `auth`, `export`. No layer imports `web`.
+
+## 2. Core contracts (Pydantic, `domain/`)
+
+```python
+class UploadProvenance(BaseModel):
+    source_type: Literal["upload"] = "upload"
+    file_id: str; filename: str; worksheet: str | None; row_number: int | None; column: str
+
+class ApiProvenance(BaseModel):
+    source_type: Literal["api"] = "api"
+    api_name: Literal["eurostat", "worldbank"]; series_id: str; query_url: HttpUrl; retrieved_at: datetime
+
+class Observation(BaseModel):
+    obs_id: str                              # stable hash(source, key, row)
+    indicator_code: str; indicator_label: str | None
+    region_code: str; region_level: Literal["country", "nuts1", "nuts2", "nuts3", "other"]
+    period: str                              # "2024-03" | "2024-Q1" | "2024"
+    frequency: Literal["M", "Q", "A"]
+    value: float | None; unit: str; unit_multiplier: int = 0
+    status_flag: str | None                  # p, e, b, ...
+    provenance: UploadProvenance | ApiProvenance = Field(discriminator="source_type")
+
+class ColumnMapping(BaseModel):
+    worksheet: str | None; header_row: int
+    date_col: str; region_col: str | None; indicator_col: str | None; value_col: str; unit_col: str | None
+    constants: dict[Literal["region", "indicator", "unit"], str] = {}
+    date_format: str | None; column_descriptions: dict[str, str] = {}   # user-supplied meanings
+
+class ValidationIssue(BaseModel):
+    code: Literal["missing_required","duplicate_row","duplicate_key_conflict","missing_value","invalid_date",
+                  "ambiguous_date","non_numeric","inconsistent_unit","unknown_region","undocumented_column",
+                  "formula_without_value","frequency_mismatch"]
+    severity: Literal["error","warning"]; rows: list[int]; column: str | None; message: str
+    resolution: Literal["pending","excluded","fixed","accepted"] = "pending"
+
+class NumericalClaim(BaseModel):
+    claim_id: str; text: str; value: float; unit: str
+    metric_id: str | None                    # e.g. "yoy:prc_hicp_manr:RO:2024-03"
+    observation_ids: list[str] = Field(min_length=1)
+
+class Citation(BaseModel):
+    kind: Literal["upload", "api", "reference"]; ref_id: str; label: str; locator: str | None
+
+class Finding(BaseModel):    headline: str; claim_ids: list[str]
+class Section(BaseModel):    indicator_code: str; title: str; paragraphs: list[str]; claim_ids: list[str]; citation_ids: list[str]
+class ReportDraft(BaseModel):
+    title: str; executive_summary: list[Finding] = Field(min_length=1, max_length=5)
+    sections: list[Section]; claims: list[NumericalClaim]; citations: list[Citation]
+    caveats: list[str]; unknown_columns_acknowledged: list[str] = []
+
+class ClaimCheck(BaseModel):  claim_id: str; ok: bool; expected: float | None; reason: str | None
+class VerificationResult(BaseModel):
+    ok: bool; checks: list[ClaimCheck]; orphan_numbers: list[str]; feedback: str   # feedback -> revise prompt
+
+class ReviewDecision(BaseModel):
+    action: Literal["approve", "reject", "request_changes"]; comment: str | None = None
+```
+
+## 3. Graph state (`graph/state.py`)
+
+```python
+class ReportState(TypedDict, total=False):
+    # parameters
+    report_id: str; user_id: str
+    params: ReportParams                               # mode, indicators, regions, period, style, formats
+    # sources & ingestion
+    file_refs: list[DatasetRef]                        # blob keys, never bytes
+    api_requests: list[ApiRequest]
+    source_metadata: Annotated[list[SourceMeta], operator.add]       # fan-in from Send
+    mappings: dict[str, ColumnMapping]                 # file_id -> mapping (survives resume)
+    validation: Annotated[dict[str, ValidationReport], merge_dicts]  # per source
+    normalized_ref: str | None                         # observations persisted in DB, state holds the ref
+    conflicts: list[Conflict]; resolutions: dict[str, ConflictResolution]
+    # analysis
+    metrics: Annotated[list[MetricResult], operator.add]             # fan-in from per-region×indicator Send
+    metric_skips: Annotated[list[MetricSkip], operator.add]
+    significant: list[SignificantChange]
+    # retrieval & drafting
+    retrieved: list[RetrievedPassage]
+    draft: ReportDraft | None; draft_history: Annotated[list[DraftAttempt], operator.add]
+    verification: VerificationResult | None
+    revision_count: int; parse_retry_count: int
+    # review & export
+    review: ReviewDecision | None; review_round: int
+    export: ExportStatus | None
+    errors: Annotated[list[WorkflowError], operator.add]
+    status: Literal["collecting","needs_input","analyzing","drafting","awaiting_review","approved","exported","failed"]
+```
+
+Large data (observations, raw files) is stored in Postgres/Blob; state carries references so checkpoints stay small (Vercel time + Neon size).
+
+## 4. Data flow
+
+```
+ Browser (HTMX)                                FastAPI (one Vercel function)                      Neon / Blob / APIs
+ ─────────────                                 ─────────────────────────────                      ──────────────────
+ Upload files ── POST /reports/{id}/files ──▶ sniff → Blob.put → FileRepo ───────────────────────▶ Blob (private), files
+ Preview/map  ── GET  …/files/{f}/preview ──▶ readers + detect_schema → grid partial
+ Run          ── GET  …/run/stream (SSE) ───▶ runner.run_segment(thread_id=report_id)
+                                                │  pg advisory lock, time budget
+                                                ▼
+ ┌──────────────────────────────── LangGraph StateGraph (checkpointed per super-step) ────────────────────────────┐
+ │ select_sources                                                                                                 │
+ │   └─▶ [ingestion subgraph]  Send(fetch_api, req)×N ‖ Send(parse_file, ref)×M  → fan-in source_metadata       │
+ │         └─▶ validate_normalize ──(issues / low-confidence mapping / conflicts?)──▶ resolve_gate ◀─┐            │
+ │                │ ok                                               interrupt(#1: mapping+issues+conflicts)   │
+ │                ▼                                                      │ Command(resume=fixes) ─────────────┘   │
+ │         analyze_dispatch ─▶ Send(analyze_one, region×indicator)×K ─▶ aggregate_metrics → flag_significant      │
+ │                ▼                                                                                               │
+ │   [retrieval subgraph]  build_queries → retrieve(pgvector | FTS) + api_metadata → prepare_context (LCEL)      │
+ │                ▼                                                                                               │
+ │   [drafting subgraph]  draft (LCEL + structured output + tools)                                               │
+ │         ├─ parse error ─▶ retry (≤2) ─▶ fail                                                                    │
+ │         ▼                                                                                                      │
+ │      verify_claims (deterministic) ──fail & revisions<3──▶ revise (feedback) ─▶ verify_claims (cycle)         │
+ │         │ fail & revisions==3 ─▶ fail_safe                                                                     │
+ │         ▼ ok                                                                                                   │
+ │   human_review  interrupt(#2: draft + citations) ── request_changes ─▶ drafting (with comment)                │
+ │         │ reject ─▶ END(rejected)        approve ▼                                                             │
+ │   export ─▶ build_pdf / build_xlsx → Blob + report_versions ─▶ END                                            │
+ └────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                │ stream_mode=["updates","custom"] → SSE events → timeline partial
+                                                │ callbacks → run_events (redacted)
+ Review form ── POST …/resume (Command) ──────▶ runner (next segment)
+```
+
+## 5. Key function signatures
+
+```python
+# ingest
+def validate_file_bytes(name: str, data: bytes, settings: Settings) -> FileCheck            # raises UploadRejected
+def read_table(data: bytes, kind: FileKind, worksheet: str | None, header_row: int | None) -> RawTable
+def list_worksheets(data: bytes, kind: FileKind) -> list[str]
+def detect_schema(table: RawTable) -> DetectedSchema
+def validate_table(table: RawTable, mapping: ColumnMapping, known_docs: set[str]) -> ValidationReport
+def to_observations(table: RawTable, mapping: ColumnMapping, file: DatasetRef, report: ValidationReport) -> list[Observation]
+async def fetch_eurostat(req: ApiRequest, client: httpx.AsyncClient) -> ApiFetchResult
+async def fetch_worldbank(req: ApiRequest, client: httpx.AsyncClient) -> ApiFetchResult
+# analytics
+def detect_conflicts(obs: list[Observation], tol: ConflictTolerance) -> list[Conflict]
+def apply_resolutions(obs, conflicts, resolutions) -> list[Observation]
+def compute_metrics(obs: pd.DataFrame, region: str, indicator: str) -> tuple[list[MetricResult], list[MetricSkip]]
+def compute_metric(metric_id: str, store: ObservationStore) -> MetricResult                     # used by tool + verifier
+def verify_draft(draft: ReportDraft, store: ObservationStore, metrics: list[MetricResult]) -> VerificationResult
+def matches_at_stated_precision(stated: float, stated_text: str, computed: float) -> bool
+# rag
+def index_documents(docs: list[Document], owner: str | None, store: VectorStore) -> int
+def retrieve(query: str, user_id: str, k: int, settings: Settings) -> list[RetrievedPassage]
+# llm
+def get_chat_model(settings: Settings) -> BaseChatModel
+def build_draft_chain(model: BaseChatModel) -> Runnable[DraftInput, ReportDraft]
+def build_tools(store: ObservationStore, user_id: str) -> list[BaseTool]
+# graph
+def build_graph(checkpointer: BaseCheckpointSaver, store: BaseStore, deps: GraphDeps) -> CompiledStateGraph
+def route_after_validation(state: ReportState) -> Literal["resolve_gate", "analyze_dispatch", "fail_safe"]
+def route_after_verify(state: ReportState) -> Literal["revise", "human_review", "fail_safe"]
+def route_after_review(state: ReportState) -> Literal["drafting", "export", "__end__"]
+async def run_segment(report_id: str, user: User, command: Command | None, budget_s: float) -> AsyncIterator[SseEvent]
+# export
+def build_pdf(bundle: ReportBundle) -> bytes
+def build_xlsx(bundle: ReportBundle) -> bytes
+```
+
+`GraphDeps` (dataclass) injects model, embeddings/retriever, repos, blob store, API clients, clock — so tests swap in `GenericFakeChatModel`, fake embeddings, `MemorySaver`/`InMemoryStore`, and stub API clients.
+
+## 6. Integration points
+
+| Point | Mechanism |
+|---|---|
+| Vercel ↔ FastAPI | root `app.py` exposes ASGI `app`; `vercel.json` sets `maxDuration`, cron `/cron/cleanup` (secret header `CRON_SECRET`) |
+| LangGraph ↔ Postgres | `PostgresSaver` / `PostgresStore` from `langgraph-checkpoint-postgres` on a psycopg pool (`autocommit=True`, `prepare_threshold=None` for Neon pooler); `.setup()` at migration time |
+| RAG ↔ pgvector | `langchain_postgres.PGVector` collection `kb_shared` + per-user filter `owner in (null, user_id)` |
+| LLM ↔ OpenAI | `init_chat_model(f"{LLM_PROVIDER}:{LLM_MODEL}")`, `.with_structured_output(ReportDraft, include_raw=True)` so parse failures are inspectable |
+| Graph ↔ browser | SSE (`text/event-stream`) of `{type, node, message, progress}`; interrupts render HTMX forms; resume via POST `Command(resume=...)` |
+| Callbacks ↔ DB | `RunEventsCallbackHandler` passed in `config["callbacks"]`, tagged with `report_id`, `user_id` |
+| Blob | Vercel Blob REST (`BLOB_READ_WRITE_TOKEN`), private access; `PostgresBlobStore` fallback; `LocalBlobStore` for dev/tests |
+
+## 7. Risk flags
+
+| # | Risk | Mitigation | Verify at |
+|---|---|---|---|
+| R1 | Bundle > Vercel limit (pandas 3 + langchain + reportlab + psycopg) | no community extras beyond loaders, exclude tests/docs via `excludeFiles`, measure in M1 | M1 |
+| R2 | SSE buffering on Vercel Python | explicit flush, `X-Accel-Buffering: no`; fallback to HTMX polling of `run_events` | M1 |
+| R3 | PostgresSaver over Neon pooler (prepared statements) | `prepare_threshold=None`; or direct (unpooled) URL for the checkpointer | M1 |
+| R4 | Long LLM call exceeds segment budget | per-call timeout (60 s), `max_retries=2`, segment budget 240 s < maxDuration 300 s | M6/M7 |
+| R5 | Concurrent resume of the same thread from two tabs | `pg_try_advisory_lock(hash(report_id))`; second tab gets "already running" | M7 |
+| R6 | Checkpoint bloat | state holds references; observations in tables | M7 |
+| R7 | `with_structured_output` provider differences | provider-agnostic via JSON-schema method + Pydantic validation + `include_raw` | M6 |
+| R8 | Eurostat API rate/latency, JSON-stat quirks | cache raw responses per report in DB (resume never refetches), backoff | M3 |
+| R9 | Private Vercel Blob availability on Hobby | `BlobStore` abstraction, Postgres fallback | M2 |
+| R10 | Cold starts compiling graph + importing pandas | lazy imports in routes, compile graph once per instance | M8 |
