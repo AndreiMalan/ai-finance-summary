@@ -144,3 +144,15 @@ def test_diag_endpoints_disabled_by_default():
     """ENABLE_DIAG_ENDPOINTS defaults to false and can be switched on."""
     assert _base().enable_diag_endpoints is False
     assert _base(enable_diag_endpoints=True).enable_diag_endpoints is True
+
+
+def test_validation_error_hides_secret_inputs():
+    """A rejected SESSION_SECRET (or other input) is never echoed in the ValidationError text."""
+    url = "postgresql://u:Sup3rS3cretDbPw@h/db"
+    with pytest.raises(ValidationError) as short_secret:
+        Settings(database_url=url, session_secret="tiny-s3cret", _env_file=None)
+    with pytest.raises(ValidationError) as model_level:  # model validators see every input
+        Settings(database_url=url, session_secret="s" * 32, db_pool_min=9, db_pool_max=1, _env_file=None)
+    for exc in (short_secret, model_level):
+        text = str(exc.value)
+        assert "tiny-s3cret" not in text and "Sup3rS3cretDbPw" not in text

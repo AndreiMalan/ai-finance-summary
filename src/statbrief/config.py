@@ -13,8 +13,10 @@ SSE_DIAG_MAX_TOTAL_S = 290.0
 class Settings(BaseSettings):
     """Every tunable of the app. Field names map to UPPER_CASE env vars."""
 
+    # hide_input_in_errors: a ValidationError must never echo SESSION_SECRET or a DB password.
     model_config = SettingsConfigDict(
-        env_file=".env", extra="ignore", case_sensitive=False, env_ignore_empty=True
+        env_file=".env", extra="ignore", case_sensitive=False, env_ignore_empty=True,
+        hide_input_in_errors=True,
     )
 
     app_env: Literal["dev", "test", "prod"] = "dev"
