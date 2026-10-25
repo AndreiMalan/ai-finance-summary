@@ -61,3 +61,6 @@ Rationale: `.env.example` ships blank placeholders; treating them as empty strin
 ## D-017 — Stateless signed session cookies (no server-side session table)
 2026-10-26 · Sessions are itsdangerous-signed cookies holding only the user id and a remember flag. "Remember me" tokens are valid for `SESSION_MAX_AGE_DAYS` (30); other tokens for `SESSION_SHORT_MAX_AGE_HOURS` (12), enforced server-side. Logout clears the cookie but cannot revoke a copied token before it expires; rotating `SESSION_SECRET` logs everyone out.
 Rationale: no extra table or lookup per request on serverless; acceptable for a demo app. Revocable server-side sessions can be added later (sessions table keyed by a random id) without changing callers of `issue_session/read_session`.
+
+## D-018 — CSRF and proxy-header trust
+2026-10-26 · M1 relies on `SameSite=Lax` session cookies (blocks cookie-bearing cross-site POSTs). Synchronizer CSRF tokens on all state-changing forms (including login, to stop login-CSRF) are added in M8 together with the report forms. `client_ip` trusts `X-Forwarded-For`, which is correct behind Vercel (the platform overwrites it); a `TRUST_PROXY_HEADERS` switch is added if the app is ever exposed without a proxy.
