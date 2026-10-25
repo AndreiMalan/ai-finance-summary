@@ -35,7 +35,7 @@ def read_state() -> dict[str, str]:
     return {k.strip(): v.strip() for k, v in pairs}
 
 
-BOOKKEEPING_PATHS = (":(exclude)docs", ":(exclude)CLAUDE.md", ":(exclude).claude")
+BOOKKEEPING_PATHS = (":(exclude)docs", ":(exclude)CLAUDE.md", ":(exclude).claude", ":(exclude)scripts/resume_check.py")
 
 
 def commits_since(base: str) -> list[str]:
