@@ -748,8 +748,8 @@ def pool(settings):
 @pytest.fixture
 def two_users(pool):
     """Two regular users."""
-    return (create_user(pool, "a@example.com", "long-enough-pw", 10),
-            create_user(pool, "b@example.com", "long-enough-pw", 10))
+    return (create_user(pool, "a@example.com", "long-enough-pw", 10, 128),
+            create_user(pool, "b@example.com", "long-enough-pw", 10, 128))
 
 
 def test_login_blocked_after_max_failures_then_window_expires(pool):
@@ -1156,7 +1156,8 @@ class RuntimeHolder:
                     pool = create_pool(self._settings)
                     s = self._settings
                     if s.demo_user_email and s.demo_user_password:
-                        upsert_demo_user(pool, s.demo_user_email, s.demo_user_password.get_secret_value())
+                        upsert_demo_user(pool, s.demo_user_email, s.demo_user_password.get_secret_value(),
+                                         s.password_min_length)
                     self._runtime = Runtime(settings=s, pool=pool)
         return self._runtime
 
@@ -1267,7 +1268,7 @@ def login(request: Request, rt: Annotated[Runtime, Depends(get_runtime)],
     if not login_allowed(rt.pool, email, ip, now, s.login_max_failures, timedelta(minutes=s.login_window_minutes)):
         ctx["error"] = f"Too many failed attempts. Try again in {s.login_window_minutes} minutes."
         return templates.TemplateResponse(request, "login.html", ctx, status_code=429)
-    user = authenticate(rt.pool, email, password)
+    user = authenticate(rt.pool, email, password, s.password_max_length)
     record_login(rt.pool, email, ip, user is not None, now)
     if user is None:
         ctx["error"] = "Incorrect email or password."
@@ -1296,7 +1297,8 @@ def signup(request: Request, rt: Annotated[Runtime, Depends(get_runtime)],
     """Create an account and log the user in."""
     _require_signups(rt)
     try:
-        user = create_user(rt.pool, email, password, rt.settings.password_min_length)
+        user = create_user(rt.pool, email, password, rt.settings.password_min_length,
+                           rt.settings.password_max_length)
     except (InvalidEmail, WeakPassword, EmailTaken) as exc:
         ctx = {"error": str(exc), "email": email, "min_length": rt.settings.password_min_length}
         return templates.TemplateResponse(request, "signup.html", ctx, status_code=400)
