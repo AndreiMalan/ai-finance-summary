@@ -57,3 +57,7 @@ Rationale: WeasyPrint/headless-browser rendering unavailable on Vercel.
 ## D-016 — Empty environment values mean "unset"
 2026-10-25 · `Settings` uses `env_ignore_empty=True`: a blank line such as `DEMO_USER_PASSWORD=` behaves as if the variable were absent (default or "required" error), never as an empty secret.
 Rationale: `.env.example` ships blank placeholders; treating them as empty strings would create a demo user with an empty password.
+
+## D-017 — Stateless signed session cookies (no server-side session table)
+2026-10-26 · Sessions are itsdangerous-signed cookies holding only the user id and a remember flag. "Remember me" tokens are valid for `SESSION_MAX_AGE_DAYS` (30); other tokens for `SESSION_SHORT_MAX_AGE_HOURS` (12), enforced server-side. Logout clears the cookie but cannot revoke a copied token before it expires; rotating `SESSION_SECRET` logs everyone out.
+Rationale: no extra table or lookup per request on serverless; acceptable for a demo app. Revocable server-side sessions can be added later (sessions table keyed by a random id) without changing callers of `issue_session/read_session`.
