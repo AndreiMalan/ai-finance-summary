@@ -286,8 +286,8 @@ Each milestone gets its own detailed plan in `docs/superpowers/plans/` and every
 1. ✅ Scaffold, `Settings` from env, embedded-Postgres test harness
 2. ✅ Postgres pool, idempotent SQL migrations, LangGraph checkpointer/store tables
 3. ✅ Argon2 passwords, user repository, demo user from env
-4. 🔄 Login throttling, per-user run limit, global daily LLM cap
-5. ⬜ Signed HttpOnly session cookies
+4. ✅ Login throttling, per-user run limit, global daily LLM cap
+5. 🔄 Signed HttpOnly session cookies
 6. ⬜ FastAPI app: lazy runtime, login/signup/logout, themed templates, Tailwind/DaisyUI build
 7. ⬜ Vercel entrypoint + config, local dev DB, spikes: bundle size (R1), SSE (R2), checkpointer (R3)
 
