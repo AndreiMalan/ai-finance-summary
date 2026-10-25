@@ -9,7 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Every tunable of the app. Field names map to UPPER_CASE env vars."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", case_sensitive=False, env_ignore_empty=True
+    )
 
     app_env: Literal["dev", "test", "prod"] = "dev"
     database_url: str
