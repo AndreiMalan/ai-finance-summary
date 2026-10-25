@@ -54,3 +54,21 @@ def test_empty_env_value_treated_as_unset(monkeypatch):
     monkeypatch.setenv("DEMO_USER_PASSWORD", "")
     s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
     assert s.demo_user_password is None
+
+
+def test_pool_min_defaults_to_one():
+    """DB_POOL_MIN defaults to 1."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert s.db_pool_min == 1
+
+
+def test_pool_min_above_max_rejected():
+    """A pool minimum larger than the maximum is refused at startup."""
+    with pytest.raises(ValidationError):
+        Settings(
+            database_url="postgresql://x/y",
+            session_secret="s" * 32,
+            db_pool_min=6,
+            db_pool_max=5,
+            _env_file=None,
+        )

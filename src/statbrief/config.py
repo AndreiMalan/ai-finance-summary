@@ -2,7 +2,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "test", "prod"] = "dev"
     database_url: str
     session_secret: SecretStr
+    db_pool_min: int = Field(1, ge=0)
     db_pool_max: int = Field(5, ge=1)
 
     signups_enabled: bool = True
@@ -40,6 +41,13 @@ class Settings(BaseSettings):
         if len(v.get_secret_value()) < 32:
             raise ValueError("SESSION_SECRET must be at least 32 characters")
         return v
+
+    @model_validator(mode="after")
+    def _pool_bounds_consistent(self) -> "Settings":
+        """Reject a pool minimum larger than the pool maximum."""
+        if self.db_pool_min > self.db_pool_max:
+            raise ValueError("DB_POOL_MIN must not exceed DB_POOL_MAX")
+        return self
 
     @property
     def cookie_secure(self) -> bool:
