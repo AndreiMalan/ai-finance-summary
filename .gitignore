@@ -11,3 +11,4 @@ local_blobs/
 *.toc
 *.fls
 *.fdb_latexmk
+.superpowers/
