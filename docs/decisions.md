@@ -53,3 +53,7 @@ Rationale: WeasyPrint/headless-browser rendering unavailable on Vercel.
 
 ## D-015 — Build process
 2026-10-25 · Phase 0 (spec, decisions, brainstorm, architecture, UI mockup) → user approval → 9 milestones each Developer → Review (≥8/10) → QA, TDD, Opus subagents, fake LLMs in tests → Retro.
+
+## D-016 — Empty environment values mean "unset"
+2026-10-25 · `Settings` uses `env_ignore_empty=True`: a blank line such as `DEMO_USER_PASSWORD=` behaves as if the variable were absent (default or "required" error), never as an empty secret.
+Rationale: `.env.example` ships blank placeholders; treating them as empty strings would create a demo user with an empty password.

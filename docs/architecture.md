@@ -266,21 +266,104 @@ def build_xlsx(bundle: ReportBundle) -> bytes
 | Callbacks ↔ DB | `RunEventsCallbackHandler` passed in `config["callbacks"]`, tagged with `report_id`, `user_id` |
 | Blob | Vercel Blob REST (`BLOB_READ_WRITE_TOKEN`), private access; `PostgresBlobStore` fallback; `LocalBlobStore` for dev/tests |
 
-## 7. Milestones
+## 7. Milestones and tasks
 
-Each milestone gets its own plan in `docs/superpowers/plans/` and runs Developer → Review (≥ 8/10) → QA.
+Each milestone gets its own detailed plan in `docs/superpowers/plans/` and every task runs Developer → Review (≥ 8/10) → QA. Task lists for M2–M9 are the planned breakdown; they are refined (and may be split or merged) when that milestone's plan is written. Status: ✅ done · 🔄 in progress · ⬜ not started.
 
-| # | Milestone | Main acceptance criteria | Plan |
+| # | Milestone | Acceptance criteria | Plan |
 |---|---|---|---|
-| M1 | Skeleton, config, Postgres, auth, rate limits, Vercel entrypoint, risk spikes R1–R3 | AC 1–6 | [2026-10-25-m1-skeleton-auth-limits.md](superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md) |
-| M2 | Common schema + file ingestion (CSV/XLSX/JSON, sniffing, detection, validation, template) + blob storage | AC 9–17, 18–19 | — |
-| M3 | API clients (Eurostat, World Bank), normalization, combining, conflict detection | AC 7–8, 18–22 | — |
-| M4 | Deterministic analytics (YoY/MoM/pp, significance) + claim verifier | AC 23–27 | — |
-| M5 | RAG: ESMB/IRS knowledge base, loaders, splitters, pgvector, retrieval | AC 31–32 | — |
-| M6 | LLM layer: models, prompts, structured output, LCEL chains, tools, callbacks | AC 28–30, 33–35, 51 | — |
-| M7 | LangGraph workflow: state, subgraphs, Send, interrupts, checkpointing, replay, memory, errors | AC 36–46 | — |
-| M8 | Web UI: wizard, preview/mapping, issues/conflicts, review, history, diagnostics, SSE timeline | AC 13–14, 41–42, 49, 52–59 | — |
-| M9 | Exports (PDF/Excel), sample data, retention cron, deployment, LaTeX concepts PDF, retro | AC 47–48, 50, 60–62 | — |
+| M1 | Skeleton, config, Postgres, auth, rate limits, Vercel entrypoint, risk spikes R1–R3 | AC 1–6 | [m1 plan](superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md) |
+| M2 | Common schema + file ingestion + blob storage | AC 9–19 | — |
+| M3 | API clients, normalization, combining, conflicts | AC 7–8, 18–22 | — |
+| M4 | Deterministic analytics + claim verifier | AC 23–27 | — |
+| M5 | RAG knowledge base and retrieval | AC 31–32 | — |
+| M6 | LLM layer | AC 28–30, 33–35, 51 | — |
+| M7 | LangGraph workflow | AC 36–46 | — |
+| M8 | Web UI | AC 13–14, 41–42, 49, 52–59 | — |
+| M9 | Exports, sample data, retention, deployment, concepts PDF, retro | AC 47–48, 50, 60–62 | — |
+
+### M1 — Skeleton, config, database, auth, limits 🔄
+1. ✅ Scaffold, `Settings` from env, embedded-Postgres test harness
+2. 🔄 Postgres pool, idempotent SQL migrations, LangGraph checkpointer/store tables
+3. ⬜ Argon2 passwords, user repository, demo user from env
+4. ⬜ Login throttling, per-user run limit, global daily LLM cap
+5. ⬜ Signed HttpOnly session cookies
+6. ⬜ FastAPI app: lazy runtime, login/signup/logout, themed templates, Tailwind/DaisyUI build
+7. ⬜ Vercel entrypoint + config, local dev DB, spikes: bundle size (R1), SSE (R2), checkpointer (R3)
+
+### M2 — Common schema and file ingestion
+1. ⬜ Domain contracts: `Observation`, provenance (upload/API), `ColumnMapping`, `ValidationIssue`, `DatasetRef`
+2. ⬜ Upload checks: size, extension, magic bytes, reject `.xlsm`/encrypted/malformed, no formula or macro execution
+3. ⬜ Readers: CSV (delimiter, decimal comma, encodings, BOM), XLSX/XLS (worksheets, header row, cached values only), JSON (records / wrapped)
+4. ⬜ Period and region parsing: `2024M03`, `2024-Q1`, Excel serials, ambiguous dates; ISO-2 / NUTS / county names, Eurostat aliases
+5. ⬜ Schema detection: header row, column roles, date format, frequency, confidence scores
+6. ⬜ Validation: missing, duplicates, invalid dates, non-numeric, unit inconsistency, unknown regions, undocumented columns
+7. ⬜ Normalization to `Observation` with file / sheet / row provenance; explicit exclusions, never silent drops
+8. ⬜ Blob storage (private Vercel Blob / Postgres fallback / local), file + report tables, user scoping
+9. ⬜ Downloadable CSV/XLSX template
+
+### M3 — Public APIs, combining, conflicts
+1. ⬜ API client base: timeouts, bounded retries with backoff, typed errors, response caching per report
+2. ⬜ Eurostat client (JSON-stat 2.0 → `Observation`, status flags, query URL provenance)
+3. ⬜ World Bank client (v2 JSON, pagination, nulls → `Observation`)
+4. ⬜ Curated indicator catalogue + "Advanced" uncurated codes
+5. ⬜ Combining datasets by indicator / region / period / unit; frequency-mismatch reporting
+6. ⬜ Conflict detection (tolerance rules) and resolutions (choose source / keep both / exclude)
+7. ⬜ Consent-based gap filling from API data, with provenance preserved
+
+### M4 — Deterministic analytics and verification
+1. ⬜ Metrics with pandas: latest, YoY, MoM, absolute, % change, percentage-point change
+2. ⬜ Validity rules + recorded skip reasons (no MoM on quarterly, no % change on rates, no cross-unit maths)
+3. ⬜ Significance flags (thresholds per indicator type) and top movers
+4. ⬜ `compute_metric(metric_id)` and the observation store used by tools and the verifier
+5. ⬜ Claim verifier: recompute, precision-aware rounding, unit/period/region checks, prose ↔ claim match, orphan numbers
+
+### M5 — RAG knowledge base
+1. ⬜ Write the 9 ESMB/IRS reference documents (MD/TXT, PDFs generated)
+2. ⬜ Document loaders (PDF/TXT/MD) and text splitters with section/page metadata
+3. ⬜ Embeddings + PGVector store; shared vs per-user collections; indexing script
+4. ⬜ Retriever with owner filtering, Postgres full-text fallback (`ENABLE_VECTOR_SEARCH`), API metadata as documents
+5. ⬜ User-uploaded reference documents (index, list, delete)
+6. ⬜ Retrieval relevance + source-metadata tests
+
+### M6 — LLM layer
+1. ⬜ Model factory via `init_chat_model` / embeddings from env (provider-agnostic)
+2. ⬜ Prompt templates: draft, data interpretation, revision, review-comment revision
+3. ⬜ Pydantic `ReportDraft` structured output with parse-failure detection (`include_raw`)
+4. ⬜ LCEL chains: context preparation, drafting, revision
+5. ⬜ Controlled tools with validated arguments and user scoping (metadata, metrics, records, compute)
+6. ⬜ Redacting callback handler → `run_events` (latency, tokens, tools, retrieval, errors)
+7. ⬜ "Unknown column meaning" guard + tests with fake chat models
+
+### M7 — LangGraph workflow
+1. ⬜ `ReportState` TypedDict, reducers, sub-states
+2. ⬜ Ingestion subgraph with Send fan-out per source + safe aggregation
+3. ⬜ Validation/normalization node + interrupt #1 (mapping, issues, conflicts)
+4. ⬜ Analysis fan-out per region × indicator + aggregation
+5. ⬜ Retrieval subgraph
+6. ⬜ Drafting subgraph: draft → verify → bounded revise loop → safe failure
+7. ⬜ Human review interrupt #2 (approve / reject / request changes) and routing
+8. ⬜ Postgres checkpointer, segmented runner (time budget, per-thread lock, SSE events)
+9. ⬜ Replay / fork from checkpoint, long-term preferences store, error-handling routes
+10. ⬜ Graph tests: routing, revision limits, parallel aggregation, interrupt resume
+
+### M8 — Web UI
+1. ⬜ App shell, navigation, wizard stepper (matches the approved mockup)
+2. ⬜ Step 1 Sources + Step 2 Upload & preview grid + column mapping
+3. ⬜ Steps 3–4 Validate, issue groups, conflict resolution
+4. ⬜ Step 5 Generate with live SSE progress timeline
+5. ⬜ Step 6 Review: draft, charts, clickable citations / provenance, approve-reject-changes
+6. ⬜ My reports (resume), History (checkpoints, fork), Diagnostics tab
+7. ⬜ Preferences, Knowledge base page, About page (with fictional-sources note)
+
+### M9 — Exports, data, deployment, docs
+1. ⬜ PDF export (reportlab): cover, summary, sections + charts, data quality, grouped citations, calculation appendix
+2. ⬜ Excel export (openpyxl, values only): Summary, Data, Metrics, Provenance, Conflicts, Citations
+3. ⬜ Dummy datasets: IRS workbook, sector CSV, JSON, cryptic-column CSV (with planted issues and conflicts)
+4. ⬜ Retention cleanup + Vercel Cron, "Delete my account"
+5. ⬜ Production deployment on Vercel + Neon + Blob, environment variables, smoke test of all 8 demo scenarios
+6. ⬜ LaTeX concepts PDF (one page per concept, clickable TOC) — local only
+7. ⬜ Final whole-branch review, QA report, Retro
 
 ## 8. Risk flags
 
