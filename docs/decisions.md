@@ -67,3 +67,7 @@ Rationale: no extra table or lookup per request on serverless; acceptable for a 
 
 ## D-019 — Vercel packaging: root `app.py`, deps in `pyproject.toml`, region `fra1`
 2026-10-26 · Root `app.py` exposes the ASGI `app` (adds `src/` to `sys.path`; the package is not pip-installed on Vercel). `pyproject.toml` `[project].dependencies` mirrors `requirements.txt` exactly (test-enforced) because Vercel's uv-based builder installs from `pyproject.toml` when present. `vercel.json`: `regions: ["fra1"]` (same region as Neon), `functions."app.py".maxDuration = 300` (Hobby maximum). Bundle budget is Vercel's documented 500 MB Python limit; R1 measured 373 MB. Details and doc links: `docs/spikes.md`.
+
+## D-020 — Uploads go directly from the browser to Vercel Blob
+2026-10-26 · Vercel functions reject request bodies over 4.5 MB, so files are not uploaded through the FastAPI function. The browser uploads straight to private Vercel Blob using a short-lived client token issued by an authenticated app endpoint (scoped to the user and report, size-capped at `MAX_UPLOAD_MB`); the app then reads the blob server-side for sniffing/validation. Local dev/tests keep a direct multipart path. Planned in M2.
+Rationale: keeps the agreed 10 MB file limit (D-004/AC 9) without hitting the platform limit; also avoids holding large bodies in function memory.
