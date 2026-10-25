@@ -35,9 +35,12 @@ def read_state() -> dict[str, str]:
     return {k.strip(): v.strip() for k, v in pairs}
 
 
+BOOKKEEPING_PATHS = (":(exclude)docs", ":(exclude)CLAUDE.md", ":(exclude).claude")
+
+
 def commits_since(base: str) -> list[str]:
-    """One-line summaries of commits after `base` on the current branch."""
-    out = git("log", "--oneline", f"{base}..HEAD") if base else ""
+    """Commits after `base` that touch code (docs/CLAUDE.md/.claude bookkeeping commits are ignored)."""
+    out = git("log", "--oneline", f"{base}..HEAD", "--", ".", *BOOKKEEPING_PATHS) if base else ""
     return out.splitlines() if out else []
 
 
