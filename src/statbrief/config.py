@@ -15,9 +15,11 @@ class Settings(BaseSettings):
 
     app_env: Literal["dev", "test", "prod"] = "dev"
     database_url: str
+    database_url_unpooled: str | None = None
     session_secret: SecretStr
     db_pool_min: int = Field(1, ge=0)
     db_pool_max: int = Field(5, ge=1)
+    db_setup_lock_timeout_s: float = Field(60.0, gt=0)
 
     signups_enabled: bool = True
     demo_user_email: str | None = None
@@ -48,6 +50,11 @@ class Settings(BaseSettings):
         if self.db_pool_min > self.db_pool_max:
             raise ValueError("DB_POOL_MIN must not exceed DB_POOL_MAX")
         return self
+
+    @property
+    def bootstrap_database_url(self) -> str:
+        """Direct (unpooled) URL for migrations and LangGraph setup, else the pooled URL."""
+        return self.database_url_unpooled or self.database_url
 
     @property
     def cookie_secure(self) -> bool:

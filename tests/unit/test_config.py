@@ -72,3 +72,29 @@ def test_pool_min_above_max_rejected():
             db_pool_max=5,
             _env_file=None,
         )
+
+
+def test_bootstrap_url_falls_back_to_pooled():
+    """Without DATABASE_URL_UNPOOLED, bootstrap uses DATABASE_URL."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert s.database_url_unpooled is None
+    assert s.bootstrap_database_url == "postgresql://x/y"
+
+
+def test_bootstrap_url_prefers_unpooled():
+    """DATABASE_URL_UNPOOLED (direct Neon URL) wins for bootstrap work."""
+    s = Settings(
+        database_url="postgresql://pooled/y",
+        database_url_unpooled="postgresql://direct/y",
+        session_secret="s" * 32,
+        _env_file=None,
+    )
+    assert s.bootstrap_database_url == "postgresql://direct/y"
+
+
+def test_setup_lock_timeout_default_and_validation():
+    """DB_SETUP_LOCK_TIMEOUT_S defaults to 60 and must be positive."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert s.db_setup_lock_timeout_s == 60.0
+    with pytest.raises(ValidationError):
+        Settings(database_url="postgresql://x/y", session_secret="s" * 32, db_setup_lock_timeout_s=0, _env_file=None)
