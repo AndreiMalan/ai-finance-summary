@@ -11,7 +11,7 @@ task: 7
 task_title: Vercel entrypoint, local dev DB, risk spikes R1/R2/R3
 phase: implementing
 branch: m1-skeleton
-base_commit: f6c861e
+base_commit: 6e21fbc
 last_verified_commit: f6c861e
 plan: docs/superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md
 next_action: Wait for the Task 7 implementer; then review package base_commit..HEAD, dispatch reviewer, fix round if needed, then deploy branch preview (R2/R3 live checks), merge m1-skeleton to main.
