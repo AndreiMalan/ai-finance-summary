@@ -282,14 +282,14 @@ Each milestone gets its own detailed plan in `docs/superpowers/plans/` and every
 | M8 | Web UI | AC 13–14, 41–42, 49, 52–59 | — |
 | M9 | Exports, sample data, retention, deployment, concepts PDF, retro | AC 47–48, 50, 60–62 | — |
 
-### M1 — Skeleton, config, database, auth, limits 🔄
+### M1 — Skeleton, config, database, auth, limits ✅
 1. ✅ Scaffold, `Settings` from env, embedded-Postgres test harness
 2. ✅ Postgres pool, idempotent SQL migrations, LangGraph checkpointer/store tables
 3. ✅ Argon2 passwords, user repository, demo user from env
 4. ✅ Login throttling, per-user run limit, global daily LLM cap
 5. ✅ Signed HttpOnly session cookies
 6. ✅ FastAPI app: lazy runtime, login/signup/logout, themed templates, Tailwind/DaisyUI build
-7. 🔄 Vercel entrypoint + config, local dev DB, spikes: bundle size (R1), SSE (R2), checkpointer (R3)
+7. ✅ Vercel entrypoint + config, local dev DB, spikes: bundle size (R1), SSE (R2), checkpointer (R3)
 
 ### M2 — Common schema and file ingestion
 1. ⬜ Domain contracts: `Observation`, provenance (upload/API), `ColumnMapping`, `ValidationIssue`, `DatasetRef`

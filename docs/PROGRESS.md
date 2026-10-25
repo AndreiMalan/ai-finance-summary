@@ -9,12 +9,12 @@ This file is updated at **every** step transition (task dispatched, implemented,
 milestone: M1
 task: 7
 task_title: Vercel entrypoint, local dev DB, risk spikes R1/R2/R3
-phase: fixing
+phase: merging
 branch: m1-skeleton
 base_commit: f6c861e
-last_verified_commit: 6a4ec94
+last_verified_commit: ad86e83
 plan: docs/superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md
-next_action: T7 small fix round (SSE duration cap, gate /_diag/sse outside prod, healthz statement_timeout, public CONN_KWARGS); then final whole-branch review; then merge m1-skeleton to main and verify production URL.
+next_action: Verify production deploy of main (login page, healthz, demo login); run final whole-branch M1 review (parallel); then start M2 plan (docs/superpowers/plans/…-m2-…).
 updated: 2026-10-26
 ```
 
@@ -47,7 +47,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 
 | Milestone | Status |
 |---|---|
-| M1 Skeleton, auth, limits, Vercel | 🔄 Tasks 1–6 ✅, Task 7 🔄 |
+| M1 Skeleton, auth, limits, Vercel | ✅ all 7 tasks; merged to main |
 | M2–M9 | ⬜ not started |
 
 ## Completed tasks (append-only)
@@ -60,6 +60,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M1-T4 Login throttling, usage limits | a7b339a..563b07d | 10/10 |
 | M1-T5 Signed session cookies | f5e81f2..f3004c7 | 10/10 |
 | M1-T6 Web app, auth UI, asset build | 53319f0..f6c861e | 9/10 |
+| M1-T7 Vercel entrypoint, spikes, deploy fixes | 71c71d4..ad86e83 | 9/10 |
 
 ## External setup status
 
