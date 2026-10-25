@@ -54,7 +54,7 @@ def test_failed_demo_seed_closes_pool(settings, monkeypatch):
     ("", "/reports"),
     ("//evil.com", "/reports"),
     ("https://evil.com", "/reports"),
-    ("/\evil.com", "/reports"),
+    ("/\\evil.com", "/reports"),
     ("/\t/evil.com", "/reports"),
     ("/\n/evil.com", "/reports"),
     ("/reports\x00", "/reports"),
@@ -67,7 +67,7 @@ def test_safe_next(raw, expected):
 
 def test_login_redirect_never_offsite(client):
     """A hostile `next` on POST /login still redirects to a same-site path."""
-    for bad in ("//evil.com", "/\evil.com", "/\t/evil.com", "https://evil.com"):
+    for bad in ("//evil.com", "/\\evil.com","/\t/evil.com", "https://evil.com"):
         r = client.post("/login", data={"email": "demo@example.com", "password": "demo-password-123", "next": bad})
         assert r.status_code == 303 and r.headers["location"] == "/reports"
 
