@@ -281,7 +281,7 @@ def db_url(pg_server):
     name = f"t_{uuid.uuid4().hex[:12]}"
     with psycopg.connect(base, autocommit=True) as c:
         c.execute(f'CREATE DATABASE "{name}"')
-    url = base.rsplit("/", 1)[0] + f"/{name}"
+    url = pg_server.get_uri(database=name)  # portable: also correct for Unix-socket URIs
     yield url
     with psycopg.connect(base, autocommit=True) as c:
         c.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')

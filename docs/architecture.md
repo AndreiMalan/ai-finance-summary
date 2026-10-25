@@ -266,7 +266,23 @@ def build_xlsx(bundle: ReportBundle) -> bytes
 | Callbacks ↔ DB | `RunEventsCallbackHandler` passed in `config["callbacks"]`, tagged with `report_id`, `user_id` |
 | Blob | Vercel Blob REST (`BLOB_READ_WRITE_TOKEN`), private access; `PostgresBlobStore` fallback; `LocalBlobStore` for dev/tests |
 
-## 7. Risk flags
+## 7. Milestones
+
+Each milestone gets its own plan in `docs/superpowers/plans/` and runs Developer → Review (≥ 8/10) → QA.
+
+| # | Milestone | Main acceptance criteria | Plan |
+|---|---|---|---|
+| M1 | Skeleton, config, Postgres, auth, rate limits, Vercel entrypoint, risk spikes R1–R3 | AC 1–6 | [2026-10-25-m1-skeleton-auth-limits.md](superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md) |
+| M2 | Common schema + file ingestion (CSV/XLSX/JSON, sniffing, detection, validation, template) + blob storage | AC 9–17, 18–19 | — |
+| M3 | API clients (Eurostat, World Bank), normalization, combining, conflict detection | AC 7–8, 18–22 | — |
+| M4 | Deterministic analytics (YoY/MoM/pp, significance) + claim verifier | AC 23–27 | — |
+| M5 | RAG: ESMB/IRS knowledge base, loaders, splitters, pgvector, retrieval | AC 31–32 | — |
+| M6 | LLM layer: models, prompts, structured output, LCEL chains, tools, callbacks | AC 28–30, 33–35, 51 | — |
+| M7 | LangGraph workflow: state, subgraphs, Send, interrupts, checkpointing, replay, memory, errors | AC 36–46 | — |
+| M8 | Web UI: wizard, preview/mapping, issues/conflicts, review, history, diagnostics, SSE timeline | AC 13–14, 41–42, 49, 52–59 | — |
+| M9 | Exports (PDF/Excel), sample data, retention cron, deployment, LaTeX concepts PDF, retro | AC 47–48, 50, 60–62 | — |
+
+## 8. Risk flags
 
 | # | Risk | Mitigation | Verify at |
 |---|---|---|---|
