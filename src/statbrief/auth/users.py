@@ -9,6 +9,8 @@ from psycopg_pool import ConnectionPool
 from statbrief.auth.passwords import hash_password, verify_password
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# RFC 5321 limits a forward-path to 256 octets incl. angle brackets, i.e. 254 for the address.
+_MAX_EMAIL_LENGTH = 254
 # Verified against when the email is unknown, so timing does not reveal which emails exist.
 _DUMMY_HASH = hash_password("timing-equaliser-not-a-real-password")
 
@@ -22,7 +24,11 @@ class EmailTaken(ValueError):
 
 
 class WeakPassword(ValueError):
-    """The password is shorter than the configured minimum."""
+    """The password is shorter than the configured minimum or longer than the maximum."""
+
+
+class DemoEmailConflict(ValueError):
+    """The configured demo email already belongs to a regular (non-demo) account."""
 
 
 @dataclass(frozen=True)
@@ -42,16 +48,25 @@ def _row_to_user(row: dict) -> User:
 def normalize_email(raw: str) -> str:
     """Trim and lower-case an email; raise InvalidEmail if it is not plausible."""
     email = raw.strip().lower()
-    if not _EMAIL_RE.match(email) or len(email) > 254:
+    if not _EMAIL_RE.match(email) or len(email) > _MAX_EMAIL_LENGTH:
         raise InvalidEmail("Please enter a valid email address.")
     return email
 
 
-def create_user(pool: ConnectionPool, email: str, password: str, min_length: int) -> User:
-    """Create a regular user; raise InvalidEmail, WeakPassword or EmailTaken."""
-    email = normalize_email(email)
+def _check_min_length(password: str, min_length: int) -> None:
+    """Raise WeakPassword if `password` is shorter than `min_length`."""
     if len(password) < min_length:
         raise WeakPassword(f"Password must be at least {min_length} characters.")
+
+
+def create_user(
+    pool: ConnectionPool, email: str, password: str, min_length: int, max_length: int
+) -> User:
+    """Create a regular user; raise InvalidEmail, WeakPassword or EmailTaken."""
+    email = normalize_email(email)
+    _check_min_length(password, min_length)
+    if len(password) > max_length:
+        raise WeakPassword(f"Password must be at most {max_length} characters.")
     try:
         with pool.connection() as c:
             row = c.execute(
@@ -74,8 +89,14 @@ def get_user(pool: ConnectionPool, user_id: str) -> User | None:
     return _row_to_user(row) if row else None
 
 
-def authenticate(pool: ConnectionPool, email: str, password: str) -> User | None:
-    """Return the user if email+password match, else None (constant-ish time)."""
+def authenticate(pool: ConnectionPool, email: str, password: str, max_length: int) -> User | None:
+    """Return the user if email+password match, else None (constant-ish time).
+
+    Passwords longer than `max_length` are rejected without hashing, so huge
+    inputs cannot be used to burn CPU; no account can have such a password.
+    """
+    if len(password) > max_length:
+        return None
     try:
         email = normalize_email(email)
     except InvalidEmail:
@@ -91,14 +112,24 @@ def authenticate(pool: ConnectionPool, email: str, password: str) -> User | None
     return _row_to_user(row) if verify_password(row["password_hash"], password) else None
 
 
-def upsert_demo_user(pool: ConnectionPool, email: str, password: str) -> User:
-    """Create or update the demo account so its password always equals the env value."""
+def upsert_demo_user(pool: ConnectionPool, email: str, password: str, min_length: int) -> User:
+    """Create or update the demo account so its password always equals the env value.
+
+    Raises InvalidEmail, WeakPassword, or DemoEmailConflict when the email already
+    belongs to a regular account (which is never modified).
+    """
     email = normalize_email(email)
+    _check_min_length(password, min_length)
     with pool.connection() as c:
         row = c.execute(
             "INSERT INTO users (email, password_hash, is_demo) VALUES (%s, %s, true) "
-            "ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_demo = true "
+            "ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash "
+            "WHERE users.is_demo "
             "RETURNING id, email, is_demo",
             (email, hash_password(password)),
         ).fetchone()
+    if row is None:
+        raise DemoEmailConflict(
+            "DEMO_USER_EMAIL belongs to a regular account; choose another address"
+        )
     return _row_to_user(row)

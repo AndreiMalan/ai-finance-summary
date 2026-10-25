@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     demo_user_email: str | None = None
     demo_user_password: SecretStr | None = None
     password_min_length: int = Field(10, ge=8)
+    password_max_length: int = Field(128, ge=16)
     session_max_age_days: int = Field(30, ge=1)
     login_max_failures: int = Field(5, ge=1)
     login_window_minutes: int = Field(15, ge=1)
@@ -49,6 +50,13 @@ class Settings(BaseSettings):
         """Reject a pool minimum larger than the pool maximum."""
         if self.db_pool_min > self.db_pool_max:
             raise ValueError("DB_POOL_MIN must not exceed DB_POOL_MAX")
+        return self
+
+    @model_validator(mode="after")
+    def _password_bounds_consistent(self) -> "Settings":
+        """Reject a password minimum length larger than the maximum length."""
+        if self.password_min_length > self.password_max_length:
+            raise ValueError("PASSWORD_MIN_LENGTH must not exceed PASSWORD_MAX_LENGTH")
         return self
 
     @property

@@ -98,3 +98,19 @@ def test_setup_lock_timeout_default_and_validation():
     assert s.db_setup_lock_timeout_s == 60.0
     with pytest.raises(ValidationError):
         Settings(database_url="postgresql://x/y", session_secret="s" * 32, db_setup_lock_timeout_s=0, _env_file=None)
+
+
+def test_password_max_length_default_and_bounds():
+    """PASSWORD_MAX_LENGTH defaults to 128, must be >= 16 and not below the minimum."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert s.password_max_length == 128
+    with pytest.raises(ValidationError):
+        Settings(database_url="postgresql://x/y", session_secret="s" * 32, password_max_length=15, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(
+            database_url="postgresql://x/y",
+            session_secret="s" * 32,
+            password_min_length=40,
+            password_max_length=32,
+            _env_file=None,
+        )
