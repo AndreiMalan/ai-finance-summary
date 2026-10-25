@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}My reports · StatBrief{% endblock %}
+{% block body %}
+<header class="flex flex-wrap items-center justify-between gap-4 bg-base-100 border-b border-base-300 px-4 py-3 md:px-8">
+  <div class="flex items-center gap-2 text-lg font-bold">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-primary" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+    StatBrief
+  </div>
+  <div class="flex items-center gap-3 text-sm">
+    <span class="text-base-content/70">{{ runs_left }} of {{ runs_per_hour }} runs left this hour</span>
+    <span class="font-medium">{{ user.email }}</span>
+    <form method="post" action="/logout"><button class="btn btn-ghost btn-sm">Log out</button></form>
+  </div>
+</header>
+<main class="mx-auto max-w-6xl px-4 py-8 md:px-8">
+  <h1 class="text-2xl font-bold mb-6">My reports</h1>
+  <div class="card bg-base-100 border border-base-300">
+    <div class="card-body items-center text-center">
+      <p class="text-base-content/70">No reports yet. The report wizard arrives in a later milestone.</p>
+    </div>
+  </div>
+</main>
+{% endblock %}

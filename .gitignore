@@ -12,3 +12,4 @@ local_blobs/
 *.fls
 *.fdb_latexmk
 .superpowers/
+node_modules/
