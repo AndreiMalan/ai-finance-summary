@@ -125,3 +125,22 @@ def test_session_short_max_age_hours_default_and_validation():
             database_url="postgresql://x/y", session_secret="s" * 32,
             session_short_max_age_hours=0, _env_file=None,
         )
+
+
+def _base(**kw) -> Settings:
+    """Settings with the two required fields plus overrides, ignoring any .env file."""
+    return Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None, **kw)
+
+
+def test_sse_diag_total_duration_capped_below_max_duration():
+    """SSE_DIAG_TICKS * SSE_DIAG_INTERVAL_S must stay under the function maxDuration margin."""
+    assert _base(sse_diag_ticks=28, sse_diag_interval_s=10.0).sse_diag_ticks == 28  # 280 s ok
+    for ticks, interval in ((29, 10.0), (60, 5.0)):  # 290 s, 300 s
+        with pytest.raises(ValidationError, match="SSE_DIAG"):
+            _base(sse_diag_ticks=ticks, sse_diag_interval_s=interval)
+
+
+def test_diag_endpoints_disabled_by_default():
+    """ENABLE_DIAG_ENDPOINTS defaults to false and can be switched on."""
+    assert _base().enable_diag_endpoints is False
+    assert _base(enable_diag_endpoints=True).enable_diag_endpoints is True

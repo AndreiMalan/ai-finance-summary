@@ -1,4 +1,7 @@
 """Hardening tests: runtime init failure, redirect safety, health check, login input caps."""
+from contextlib import contextmanager
+from types import SimpleNamespace
+
 import psycopg
 from pydantic import SecretStr
 import pytest
@@ -112,6 +115,49 @@ def test_healthz_db_failure(settings, monkeypatch):
         r = client.get("/healthz")
     assert r.status_code == 503 and r.json() == {"ok": False, "db": False}
     assert seen_kwargs == [{"timeout": 1.25}]
+
+
+class _RecordingConnection:
+    """Stand-in pooled connection that records SQL and answers SELECT 1."""
+
+    def __init__(self):
+        """Start with no recorded statements."""
+        self.executed: list[tuple[str, object]] = []
+        self.in_transaction = False
+
+    @contextmanager
+    def transaction(self):
+        """Mark statements executed inside the block as transactional."""
+        self.in_transaction = True
+        try:
+            yield
+        finally:
+            self.in_transaction = False
+
+    def execute(self, sql, params=None):
+        """Record the statement (with its transaction state) and return a one-row result."""
+        self.executed.append((sql, params, self.in_transaction))
+        return SimpleNamespace(fetchone=lambda: {"one": 1})
+
+
+def test_healthz_sets_statement_timeout(settings, monkeypatch):
+    """The health query runs under a transaction-local statement_timeout from HEALTHZ_DB_TIMEOUT_S."""
+    custom = settings.model_copy(update={"healthz_db_timeout_s": 1.25})
+    with TestClient(create_app(custom), follow_redirects=False) as client:
+        rt = client.app.state.runtime_holder.get()
+        fake = _RecordingConnection()
+
+        @contextmanager
+        def fake_connection(**_kw):
+            """Hand out the recording connection."""
+            yield fake
+
+        monkeypatch.setattr(rt.pool, "connection", fake_connection)
+        r = client.get("/healthz")
+    assert r.status_code == 200
+    (set_sql, set_params, set_tx), (sel_sql, _p, sel_tx) = fake.executed
+    assert "statement_timeout" in set_sql and set_params == ("1250",) and set_tx
+    assert "SELECT 1" in sel_sql and sel_tx
 
 
 def test_oversized_login_email_capped(client):

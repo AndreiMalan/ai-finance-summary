@@ -96,3 +96,8 @@ def test_unlock_failure_does_not_mask_setup_error(db_url, monkeypatch, caplog):
     with connect(db_url) as conn, pytest.raises(ValueError, match="setup exploded"):
         setup_langgraph(conn, 5.0)
     assert "unlock failed" in caplog.text
+
+
+def test_conn_kwargs_public():
+    """CONN_KWARGS is the public, shared connection configuration (Neon-pooler safe)."""
+    assert db.CONN_KWARGS["prepare_threshold"] is None and db.CONN_KWARGS["autocommit"] is True

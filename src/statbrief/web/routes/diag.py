@@ -5,7 +5,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from statbrief.web.deps import get_runtime
@@ -21,7 +21,12 @@ def sse_event(event: str, data: dict) -> str:
 
 @router.get("/_diag/sse")
 async def sse_diag(rt: Annotated[Runtime, Depends(get_runtime)]) -> StreamingResponse:
-    """Emit a few timed ticks so we can see whether events arrive incrementally."""
+    """Emit a few timed ticks so we can see whether events arrive incrementally.
+
+    Hidden (404) in prod unless ENABLE_DIAG_ENDPOINTS is true.
+    """
+    if not rt.settings.diag_endpoints_enabled:
+        raise HTTPException(status_code=404)
     ticks, interval = rt.settings.sse_diag_ticks, rt.settings.sse_diag_interval_s
 
     async def gen() -> AsyncIterator[str]:

@@ -5,6 +5,10 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Upper bound (seconds) for one /_diag/sse stream: below Vercel's 300 s function maxDuration
+# (Hobby maximum, vercel.json) with a 10 s margin for cold start and response overhead.
+SSE_DIAG_MAX_TOTAL_S = 290.0
+
 
 class Settings(BaseSettings):
     """Every tunable of the app. Field names map to UPPER_CASE env vars."""
@@ -41,6 +45,7 @@ class Settings(BaseSettings):
 
     sse_diag_ticks: int = Field(5, ge=1, le=60)
     sse_diag_interval_s: float = Field(1.0, ge=0.0, le=10.0)
+    enable_diag_endpoints: bool = False  # /_diag/* outside dev/test only when true
 
     @field_validator("session_secret")
     @classmethod
@@ -63,6 +68,20 @@ class Settings(BaseSettings):
         if self.password_min_length > self.password_max_length:
             raise ValueError("PASSWORD_MIN_LENGTH must not exceed PASSWORD_MAX_LENGTH")
         return self
+
+    @model_validator(mode="after")
+    def _sse_diag_within_max_duration(self) -> "Settings":
+        """Reject SSE diagnostics streams that could outlive the serverless function."""
+        if self.sse_diag_ticks * self.sse_diag_interval_s >= SSE_DIAG_MAX_TOTAL_S:
+            raise ValueError(
+                f"SSE_DIAG_TICKS * SSE_DIAG_INTERVAL_S must be below {SSE_DIAG_MAX_TOTAL_S:g} s"
+            )
+        return self
+
+    @property
+    def diag_endpoints_enabled(self) -> bool:
+        """Whether /_diag/* routes respond: always outside prod, in prod only when enabled."""
+        return self.app_env != "prod" or self.enable_diag_endpoints
 
     @property
     def bootstrap_database_url(self) -> str:

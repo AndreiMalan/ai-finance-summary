@@ -1,4 +1,3 @@
-.env
 .venv/
 __pycache__/
 *.pyc
@@ -14,8 +13,6 @@ local_blobs/
 .superpowers/
 node_modules/
 .devdb/
-
-.vercel
+# env files (incl. .env.local from `vercel link`); keep the tracked template
 .env*
-# tracked template of env vars (the .env* rule above would hide new copies)
 !.env.example

@@ -19,12 +19,12 @@ _LANGGRAPH_SETUP_LOCK_KEY = 0x5B_0002  # pg advisory lock id serialising concurr
 _LANGGRAPH_SETUP_LOCK_POLL_SECONDS = 0.1
 # Every connection (pooled or direct): no implicit transactions, no server-side prepared
 # statements (unsupported by Neon's transaction-mode pooler), rows as dicts.
-_CONN_KWARGS = {"autocommit": True, "prepare_threshold": None, "row_factory": dict_row}
+CONN_KWARGS = {"autocommit": True, "prepare_threshold": None, "row_factory": dict_row}
 
 
 def connect(url: str) -> Connection:
     """Open a single direct psycopg connection with the app's standard settings."""
-    return Connection.connect(url, **_CONN_KWARGS)
+    return Connection.connect(url, **CONN_KWARGS)
 
 
 def create_pool(settings: Settings) -> ConnectionPool:
@@ -33,7 +33,7 @@ def create_pool(settings: Settings) -> ConnectionPool:
         settings.database_url,
         min_size=settings.db_pool_min,
         max_size=settings.db_pool_max,
-        kwargs=_CONN_KWARGS,
+        kwargs=CONN_KWARGS,
         open=False,
     )
     pool.open(wait=True)

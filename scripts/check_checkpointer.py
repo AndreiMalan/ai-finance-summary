@@ -22,7 +22,7 @@ from psycopg_pool import ConnectionPool  # noqa: E402
 
 from statbrief.config import Settings  # noqa: E402
 # Same connection kwargs as the app's pool (autocommit, prepare_threshold=None, dict rows).
-from statbrief.storage.db import _CONN_KWARGS, connect, setup_langgraph  # noqa: E402
+from statbrief.storage.db import CONN_KWARGS, connect, setup_langgraph  # noqa: E402
 
 
 class S(TypedDict, total=False):
@@ -73,11 +73,11 @@ def main() -> None:
         setup_langgraph(conn, args.lock_timeout_s)
 
     cfg = {"configurable": {"thread_id": f"probe-{uuid.uuid4().hex[:8]}"}}
-    with ConnectionPool(pooled, kwargs=_CONN_KWARGS, open=True) as p1:
+    with ConnectionPool(pooled, kwargs=CONN_KWARGS, open=True) as p1:
         out = build(p1).invoke({}, cfg)
         assert "__interrupt__" in out, out
         print("interrupted:", out["__interrupt__"])
-    with ConnectionPool(pooled, kwargs=_CONN_KWARGS, open=True) as p2:  # simulates a new serverless instance
+    with ConnectionPool(pooled, kwargs=CONN_KWARGS, open=True) as p2:  # simulates a new serverless instance
         final = build(p2).invoke(Command(resume="yes"), cfg)
     assert final == {"x": 1, "answer": "yes"}, final
     print("R3 OK: interrupt persisted and resumed across pools:", final)
