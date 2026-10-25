@@ -9,12 +9,12 @@ This file is updated at **every** step transition (task dispatched, implemented,
 milestone: M1
 task: 7
 task_title: Vercel entrypoint, local dev DB, risk spikes R1/R2/R3
-phase: implementing
+phase: reviewing
 branch: m1-skeleton
 base_commit: f6c861e
 last_verified_commit: f6c861e
 plan: docs/superpowers/plans/2026-10-25-m1-skeleton-auth-limits.md
-next_action: Wait for the Task 7 implementer; then review package base_commit..HEAD, dispatch reviewer, fix round if needed, then deploy branch preview (R2/R3 live checks), merge m1-skeleton to main.
+next_action: Task 7 review (package excludes bookkeeping commits); then fix round if needed, preview deploy for R2/R3, merge to main.
 updated: 2026-10-26
 ```
 
