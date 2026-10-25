@@ -28,8 +28,19 @@ def _signup(client, email="h@example.com"):
     assert r.status_code == 303
 
 
-def test_failed_demo_seed_closes_pool(settings, monkeypatch):
-    """A WeakPassword during demo seeding closes the new pool; retries never leave pools open."""
+def test_misconfigured_demo_user_does_not_take_site_down(settings):
+    """A too-short DEMO_USER_PASSWORD is logged and flagged by /healthz; pages still work."""
+    bad = settings.model_copy(update={"demo_user_password": SecretStr("short")})
+    with TestClient(create_app(bad), follow_redirects=False) as c:
+        assert c.get("/login").status_code == 200
+        r = c.get("/healthz")
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "db": True, "demo_user": "misconfigured"}
+        assert c.post("/login", data={"email": "demo@example.com", "password": "short"}).status_code == 400
+
+
+def test_failed_runtime_init_closes_pool(settings, monkeypatch):
+    """An infrastructure error during init closes the new pool; retries never leave pools open."""
     opened = []
     real_create_pool = runtime_mod.create_pool
 
@@ -39,9 +50,13 @@ def test_failed_demo_seed_closes_pool(settings, monkeypatch):
         opened.append(pool)
         return pool
 
+    def failing_seed(*_args, **_kwargs):
+        """Simulate a database failure while seeding the demo user."""
+        raise psycopg.OperationalError("simulated outage")
+
     monkeypatch.setattr(runtime_mod, "create_pool", recording_create_pool)
-    bad = settings.model_copy(update={"demo_user_password": SecretStr("short")})
-    app = create_app(bad)
+    monkeypatch.setattr(runtime_mod, "upsert_demo_user", failing_seed)
+    app = create_app(settings)
     with TestClient(app, follow_redirects=False, raise_server_exceptions=False) as c:
         assert c.get("/login").status_code == 500
         assert len(opened) == 1 and opened[0].closed

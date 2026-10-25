@@ -40,7 +40,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz(request: Request) -> JSONResponse:
-        """Liveness + database check; 503 when the database is unreachable."""
+        """Liveness + database check; 503 when the database is unreachable; flags a misconfigured demo user."""
+        demo_error = None
         try:
             rt = get_runtime(request)
             timeout_s = rt.settings.healthz_db_timeout_s
@@ -50,11 +51,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 c.execute("SELECT set_config('statement_timeout', %s, true)",
                           (str(max(1, round(timeout_s * 1000))),))
                 ok = c.execute("SELECT 1 AS one").fetchone()["one"] == 1
+            demo_error = rt.demo_error
         except psycopg.Error as exc:  # psycopg_pool errors (PoolTimeout, PoolClosed) subclass this
             # Log only the exception class: messages can echo connection details.
             logger.warning("healthz database check failed: %s", type(exc).__name__)
             ok = False
-        return JSONResponse({"ok": ok, "db": ok}, status_code=200 if ok else 503)
+        body = {"ok": ok, "db": ok}
+        if demo_error:
+            body["demo_user"] = "misconfigured"
+        return JSONResponse(body, status_code=200 if ok else 503)
 
     from statbrief.web.routes import auth, diag, pages
 
