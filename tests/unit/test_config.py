@@ -114,3 +114,14 @@ def test_password_max_length_default_and_bounds():
             password_max_length=32,
             _env_file=None,
         )
+
+
+def test_session_short_max_age_hours_default_and_validation():
+    """Non-remember session lifetime defaults to 12 h and must be at least 1 h."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert s.session_short_max_age_hours == 12
+    with pytest.raises(ValidationError):
+        Settings(
+            database_url="postgresql://x/y", session_secret="s" * 32,
+            session_short_max_age_hours=0, _env_file=None,
+        )

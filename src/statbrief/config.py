@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     password_min_length: int = Field(10, ge=8)
     password_max_length: int = Field(128, ge=16)
     session_max_age_days: int = Field(30, ge=1)
+    session_short_max_age_hours: int = Field(12, ge=1)
     login_max_failures: int = Field(5, ge=1)
     login_window_minutes: int = Field(15, ge=1)
 
