@@ -360,7 +360,7 @@ CREATE INDEX IF NOT EXISTS usage_events_user_kind_at ON usage_events (user_id, k
 - [ ] **Step 2: Write the failing test** — `tests/unit/test_db.py`
 ```python
 """Tests for pool creation, idempotent migrations and LangGraph table setup."""
-from statbrief.storage.db import create_pool, run_migrations, setup_langgraph
+from statbrief.storage.db import bootstrap, create_pool
 
 
 def test_migrations_apply_once(settings):
@@ -474,7 +474,7 @@ git commit -m "feat(m1): postgres pool, idempotent migrations, langgraph table s
 - Create: `src/statbrief/auth/__init__.py`, `src/statbrief/auth/passwords.py`, `src/statbrief/auth/users.py`, `tests/unit/test_users.py`
 
 **Interfaces:**
-- Consumes: `create_pool`, `run_migrations`.
+- Consumes: `bootstrap(settings)` (migrations + LangGraph setup on the direct URL), `create_pool(settings)`.
 - Produces:
   - `hash_password(pw: str) -> str`, `verify_password(stored_hash: str, pw: str) -> bool`
   - `@dataclass(frozen=True) User(id: str, email: str, is_demo: bool)`
@@ -494,14 +494,14 @@ from statbrief.auth.users import (
     EmailTaken, InvalidEmail, WeakPassword,
     authenticate, create_user, get_user, normalize_email, upsert_demo_user,
 )
-from statbrief.storage.db import create_pool, run_migrations
+from statbrief.storage.db import bootstrap, create_pool
 
 
 @pytest.fixture
 def pool(settings):
     """Migrated pool for one test."""
+    bootstrap(settings)
     p = create_pool(settings)
-    run_migrations(p)
     yield p
     p.close()
 
@@ -730,7 +730,7 @@ from statbrief.auth.limits import (
     consume, hour_ago, login_allowed, record_login, remaining, utc_midnight,
 )
 from statbrief.auth.users import create_user
-from statbrief.storage.db import create_pool, run_migrations
+from statbrief.storage.db import bootstrap, create_pool
 
 NOW = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
 WINDOW = timedelta(minutes=15)
@@ -739,8 +739,8 @@ WINDOW = timedelta(minutes=15)
 @pytest.fixture
 def pool(settings):
     """Migrated pool for one test."""
+    bootstrap(settings)
     p = create_pool(settings)
-    run_migrations(p)
     yield p
     p.close()
 
@@ -1123,7 +1123,7 @@ from psycopg_pool import ConnectionPool
 
 from statbrief.auth.users import upsert_demo_user
 from statbrief.config import Settings
-from statbrief.storage.db import create_pool, run_migrations, setup_langgraph
+from statbrief.storage.db import bootstrap, create_pool
 
 
 @dataclass
@@ -1152,9 +1152,8 @@ class RuntimeHolder:
         if self._runtime is None:
             with self._lock:
                 if self._runtime is None:
+                    bootstrap(self._settings)
                     pool = create_pool(self._settings)
-                    run_migrations(pool)
-                    setup_langgraph(pool)
                     s = self._settings
                     if s.demo_user_email and s.demo_user_password:
                         upsert_demo_user(pool, s.demo_user_email, s.demo_user_password.get_secret_value())
@@ -1869,4 +1868,4 @@ git commit -m "feat(m1): vercel entrypoint, dev db, SSE/bundle/checkpointer spik
 
 1. **Spec coverage (M1 scope):** AC 2 (signup/login/Argon2/cookies) → T3, T5, T6. AC 3 (demo user from env) → T3, T6 runtime seeding. AC 4 (login throttling) → T4, T6. AC 5 (run limit + daily cap) → T4 (enforcement in run routes comes in M7/M8; quota displayed in T6). AC 6 (user scoping) → user_id on all tables; enforced repos arrive with reports in M2+. AC 1 (Vercel deploy) → T7 (actual deploy needs user's Vercel account). AC 9 limits → settings in T1 (enforced in M2). R1/R2/R3 → T7.
 2. **Placeholders:** `docs/spikes.md` contains "<paste …>" cells intentionally filled with measured output in Step 10 — they are results, not code.
-3. **Type consistency:** `create_pool`, `run_migrations`, `setup_langgraph`, `User`, `consume`, `LimitExceeded`, `issue_session/read_session/clear_session`, `Runtime/RuntimeHolder`, `get_runtime`, `current_user` names match across tasks.
+3. **Type consistency:** `bootstrap`, `create_pool`, `run_migrations(conn)`, `setup_langgraph(conn, timeout)`, `User`, `consume`, `LimitExceeded`, `issue_session/read_session/clear_session`, `Runtime/RuntimeHolder`, `get_runtime`, `current_user` names match across tasks.
