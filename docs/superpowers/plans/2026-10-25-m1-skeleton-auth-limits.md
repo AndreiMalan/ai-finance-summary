@@ -320,7 +320,7 @@ git commit -m "feat(m1): project scaffold, env settings, pgserver test harness"
 
 **Interfaces:**
 - Consumes: `Settings`.
-- Produces: `create_pool(settings) -> psycopg_pool.ConnectionPool` (opened); `run_migrations(pool) -> list[str]` (applied versions, idempotent); `setup_langgraph(pool) -> None` (creates checkpointer + store tables).
+- Produces (as implemented after review): `connect(url) -> psycopg.Connection`; `create_pool(settings) -> psycopg_pool.ConnectionPool` (opened, on `DATABASE_URL`); `bootstrap(settings) -> None` (migrations + LangGraph setup on `DATABASE_URL_UNPOOLED`, falling back to `DATABASE_URL`); `run_migrations(conn) -> list[str]`; `setup_langgraph(conn, lock_timeout_s) -> None`.
 
 - [ ] **Step 1: Migration SQL** — `src/statbrief/storage/migrations/001_auth_limits.sql`
 ```sql
