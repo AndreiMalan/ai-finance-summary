@@ -111,6 +111,7 @@ class DetectedSchema(BaseModel):
     excel_serial: bool = False
     decimal: Literal[".", ","] | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
+    header_confidence: float = Field(1.0, ge=0.0, le=1.0)  # evidence that header_row is the real header
 
     def _col(self, role: str) -> ColumnGuess | None:
         """The column guessed for `role`, if any."""
@@ -135,9 +136,10 @@ class DetectedSchema(BaseModel):
             return None  # missing region/indicator/unit: the user must supply constants
 
     def needs_review(self, threshold: float) -> bool:
-        """True when any mapped role is below `threshold` or the suggestion is incomplete."""
+        """True when the header or any mapped role is below `threshold`, or the suggestion is incomplete."""
         mapped = [c for c in self.columns if c.role != "ignore"]
-        return self.suggested_mapping() is None or any(c.confidence < threshold for c in mapped)
+        return (self.header_confidence < threshold or self.suggested_mapping() is None
+                or any(c.confidence < threshold for c in mapped))
 
 
 class ValidationIssue(BaseModel):

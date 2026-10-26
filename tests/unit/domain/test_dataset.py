@@ -37,6 +37,20 @@ def test_detected_schema_suggested_mapping_and_review():
     assert DetectedSchema(worksheet=None, header_row=1, columns=cols[:1]).suggested_mapping() is None
 
 
+
+def test_low_header_confidence_needs_review():
+    """An uncertain header row alone makes the schema need review."""
+    cols = [ColumnGuess(column="luna", role="date", confidence=0.95),
+            ColumnGuess(column="judet", role="region", confidence=0.9),
+            ColumnGuess(column="indicator", role="indicator", confidence=0.9),
+            ColumnGuess(column="valoare", role="value", confidence=0.97),
+            ColumnGuess(column="um", role="unit", confidence=0.9)]
+    assert DetectedSchema(worksheet=None, header_row=1, columns=cols).header_confidence == 1.0
+    s = DetectedSchema(worksheet=None, header_row=1, columns=cols, header_confidence=0.5)
+    assert s.needs_review(0.8) is True and s.needs_review(0.4) is False
+    with pytest.raises(ValidationError):
+        DetectedSchema(worksheet=None, header_row=1, columns=cols, header_confidence=1.5)
+
 def test_report_blocking_and_resolution():
     """Pending errors block; resolving them (or only warnings) unblocks; resolution returns a copy."""
     err = ValidationIssue(issue_id="invalid_date:luna", code="invalid_date", severity="error", rows=[18],

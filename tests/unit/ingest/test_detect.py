@@ -87,3 +87,93 @@ def test_formula_without_value_column_is_not_mapped_from_content():
     roles = {c.column: c.role for c in s.columns}
     assert roles == {"date": "date", "value": "value", "calc": "ignore"}
     assert next(c for c in s.columns if c.column == "calc").note == "undocumented"
+
+
+def _grid(rows):
+    """Grid from literal rows numbered from 1."""
+    return Grid(rows=rows, row_numbers=list(range(1, len(rows) + 1)), meta={})
+
+
+def _by_col(s):
+    """Column name -> ColumnGuess."""
+    return {c.column: c for c in s.columns}
+
+
+def test_two_date_columns_are_ambiguous():
+    """A report-date column next to the period column caps the date confidence and needs review."""
+    rows = [["Data raportare", "Perioada", "Judet", "Indicator", "Valoare", "UM"]] + [
+        ["2025-01-15", f"2024-0{m}", j, "PIB", 1.0 * m, "%"] for m in range(1, 7) for j in ("Cluj", "Iasi")]
+    s = detect_schema(_grid(rows), **KW)
+    date = next(c for c in s.columns if c.role == "date")
+    assert date.confidence <= 0.7 and date.note.startswith("ambiguous: also ")
+    assert s.needs_review(0.8)
+
+
+def test_two_value_columns_are_ambiguous():
+    """An adjusted value column next to the value column makes the value guess ambiguous."""
+    rows = [["Perioada", "Judet", "Indicator", "Valoare ajustata", "Valoare", "UM"]] + [
+        [f"2024-0{m}", j, "PIB", 2.0 * m, 1.0 * m, "%"] for m in range(1, 7) for j in ("Cluj", "Iasi")]
+    s = detect_schema(_grid(rows), **KW)
+    value = next(c for c in s.columns if c.role == "value")
+    assert value.confidence <= 0.7 and "ambiguous" in value.note
+    assert s.needs_review(0.8)
+
+
+def test_two_region_columns_are_ambiguous():
+    """Partner and reporter country codes both look like regions; the guess is flagged."""
+    rows = [["time", "partner country", "country", "indicator", "value", "unit"]] + [
+        [f"2024-0{m}", "DE", g, "EXP", 1.0, "EUR"] for m in range(1, 7) for g in ("RO", "HU")]
+    s = detect_schema(_grid(rows), **KW)
+    region = next(c for c in s.columns if c.role == "region")
+    other = "country" if region.column == "partner country" else "partner country"
+    assert region.confidence <= 0.7 and region.note == f"ambiguous: also {other}/region"
+    assert s.needs_review(0.8)
+
+
+def test_unit_of_measure_header_is_unit_not_indicator():
+    """'Unit of measure' with % values is the unit column."""
+    rows = [["Time", "Geo", "Indicator", "Obs value", "Unit of measure"]] + [
+        [f"2024-0{m}", j, "HICP", 1.0 * m, "%"] for m in range(1, 4) for j in ("RO", "HU")]
+    c = _by_col(detect_schema(_grid(rows), **KW))
+    assert c["Unit of measure"].role == "unit" and c["Indicator"].role == "indicator"
+
+
+def test_mostly_unit_values_are_unit_not_indicator():
+    """An unnamed column of mostly % values is a unit, not a categorical indicator."""
+    rows = [["date", "value", "u"]] + [[f"2024-0{m}", 1.0, "%" if m < 8 else "lei"] for m in range(1, 10)]
+    assert _by_col(detect_schema(_grid(rows), **KW))["u"].role == "unit"
+
+
+def test_serial_range_counts_are_values_next_to_real_date():
+    """Integer counts in the Excel serial range are values when the column has no date name."""
+    rows = [["perioada", "a", "judet"]] + [[f"2024-0{m}", 30000 + m * 7, "Cluj"] for m in range(1, 10)]
+    s = detect_schema(_grid(rows), **KW)
+    c = _by_col(s)
+    assert c["perioada"].role == "date" and c["a"].role == "value" and s.excel_serial is False
+
+
+def test_serial_range_counts_without_date_column_are_not_dates():
+    """Population counts are never read as Excel dates when nothing names them a date."""
+    rows = [["cod_siruta", "populatie"]] + [[s, p] for s, p in ((54975, 30000), (9262, 41000), (95060, 25000))] * 3
+    s = detect_schema(_grid(rows), **KW)
+    assert _by_col(s)["populatie"].role != "date" and s.excel_serial is False
+
+
+def test_date_named_serial_column_detected_as_excel_dates():
+    """A 'data' column holding Excel serials is a date column with excel_serial set."""
+    rows = [["data", "valoare"]] + [[serial, 1.5] for serial in (45292, 45323, 45352, 45383)]
+    s = detect_schema(_grid(rows), **KW)
+    assert _by_col(s)["data"].role == "date" and s.excel_serial is True and s.frequency == "M"
+
+
+def test_header_without_role_hints_has_low_header_confidence():
+    """A title row picked as header (no role name in it) gets header confidence 0.5 and needs review."""
+    rows = [["Raport INS", "Inflatie 2024"], ["Sursa: INS", "generat 2024"], ["luna", "judet", "valoare"]] + [
+        [f"2024-0{m}", "Cluj", 1.0] for m in range(1, 4)]
+    s = detect_schema(_grid(rows), **KW)
+    assert s.header_confidence == 0.5 and s.needs_review(0.8)
+
+
+def test_header_with_role_hints_has_full_header_confidence():
+    """A header naming known roles keeps header confidence 1.0."""
+    assert detect_schema(_irs_grid(), **KW).header_confidence == 1.0
