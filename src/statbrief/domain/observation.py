@@ -10,11 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 Frequency = Literal["A", "Q", "M"]
 RegionLevel = Literal["country", "nuts1", "nuts2", "nuts3", "aggregate", "other"]
 
-# Canonical period formats per frequency (protocol, not tunables).
+# Canonical period formats per frequency (protocol, not tunables). Used with fullmatch and ASCII-only
+# [0-9] so a trailing newline or non-ASCII digits (which \d would accept) are rejected.
 _PERIOD_PATTERNS = {
-    "A": re.compile(r"^\d{4}$"),
-    "Q": re.compile(r"^\d{4}-Q[1-4]$"),
-    "M": re.compile(r"^\d{4}-(0[1-9]|1[0-2])$"),
+    "A": re.compile(r"[0-9]{4}"),
+    "Q": re.compile(r"[0-9]{4}-Q[1-4]"),
+    "M": re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])"),
 }
 
 
@@ -64,7 +65,7 @@ class Observation(BaseModel):
     @model_validator(mode="after")
     def _consistent(self) -> "Observation":
         """Period must match its frequency's canonical format; values must be finite."""
-        if not _PERIOD_PATTERNS[self.frequency].match(self.period):
+        if not _PERIOD_PATTERNS[self.frequency].fullmatch(self.period):
             raise ValueError(f"period {self.period!r} does not match frequency {self.frequency}")
         if self.value is not None and not math.isfinite(self.value):
             raise ValueError("value must be finite (use None for a missing observation)")
@@ -72,6 +73,11 @@ class Observation(BaseModel):
 
 
 def make_obs_id(*parts: object) -> str:
-    """Deterministic observation id from its identifying parts."""
+    """Deterministic observation id from its identifying parts.
+
+    Each part is stringified with ``str()`` and joined with a unit separator before hashing, so callers
+    must pass parts consistently (ints for row numbers, str for codes): ``14`` and ``"14"`` collide, while
+    ``14`` and ``"014"`` do not.
+    """
     digest = hashlib.sha1("\x1f".join(str(p) for p in parts).encode("utf-8")).hexdigest()
     return f"obs_{digest[:16]}"

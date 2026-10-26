@@ -66,3 +66,11 @@ def test_make_obs_id_stable_and_distinct():
     assert a == make_obs_id("f1", 14, "HICP", "RO113", "2024-03")
     assert a != make_obs_id("f1", 15, "HICP", "RO113", "2024-03")
     assert a.startswith("obs_") and len(a) == 20
+
+
+@pytest.mark.parametrize("period,freq", [("2024\n", "A"), ("2024-03\n", "M"), ("2024-Q1\n", "Q"),
+                                         ("٢٠٢٤", "A"), ("2024-٠٣", "M")])
+def test_period_trailing_newline_and_non_ascii_digits_rejected(period, freq):
+    """Periods must be exactly the canonical ASCII form (no trailing newline, no non-ASCII digits)."""
+    with pytest.raises(ValidationError):
+        _obs(period=period, frequency=freq)

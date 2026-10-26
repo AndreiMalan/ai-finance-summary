@@ -1,7 +1,7 @@
 """Contracts for uploaded datasets: references, column mappings, detection results, validation reports."""
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from statbrief.domain.observation import Frequency
 
@@ -15,6 +15,9 @@ IssueCode = Literal[
     "formula_without_value", "frequency_mismatch",
 ]
 Resolution = Literal["pending", "excluded", "fixed", "accepted"]
+# Resolutions that clear an error; "accepted" is only meaningful for warnings.
+_ERROR_CLEARING: frozenset[str] = frozenset({"excluded", "fixed"})
+_CONSTANT_ROLES = ("region", "indicator", "unit")
 
 
 class DatasetRef(BaseModel):
@@ -36,8 +39,8 @@ class ColumnMapping(BaseModel):
 
     worksheet: str | None = None
     header_row: int = Field(1, ge=1)  # 1-based row number of the header line in the file/sheet
-    date_col: str
-    value_col: str
+    date_col: str = Field(min_length=1)
+    value_col: str = Field(min_length=1)
     region_col: str | None = None
     indicator_col: str | None = None
     unit_col: str | None = None
@@ -46,11 +49,37 @@ class ColumnMapping(BaseModel):
     decimal: DecimalSep = "auto"
     column_descriptions: dict[str, str] = Field(default_factory=dict)
 
+    @field_validator("date_col", "value_col", mode="before")
+    @classmethod
+    def _strip_required(cls, v: Any) -> Any:
+        """Strip required column names so a whitespace-only name fails min_length."""
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("region_col", "indicator_col", "unit_col", mode="before")
+    @classmethod
+    def _blank_to_none(cls, v: Any) -> Any:
+        """Strip optional column names; a blank/whitespace name means the column is unmapped (None)."""
+        if isinstance(v, str):
+            return v.strip() or None
+        return v
+
+    @field_validator("constants", mode="before")
+    @classmethod
+    def _clean_constants(cls, v: Any) -> Any:
+        """Strip constant values and drop blank ones (a blank constant is no constant)."""
+        if isinstance(v, dict):
+            return {k: (c.strip() if isinstance(c, str) else c) for k, c in v.items()
+                    if not (isinstance(c, str) and not c.strip())}
+        return v
+
     @model_validator(mode="after")
     def _complete(self) -> "ColumnMapping":
-        """Region/indicator/unit come from a column or a constant; no column serves two roles."""
-        for role in ("region", "indicator", "unit"):
-            if not getattr(self, f"{role}_col") and not self.constants.get(role, "").strip():
+        """Region/indicator/unit come from exactly one of a column or a constant; no column serves two roles."""
+        for role in _CONSTANT_ROLES:
+            has_col, has_const = bool(getattr(self, f"{role}_col")), role in self.constants
+            if has_col and has_const:
+                raise ValueError(f"{role}: use either a column or a constant, not both")
+            if not has_col and not has_const:
                 raise ValueError(f"{role}: map a column or set a constant")
         used = [c for c in (self.date_col, self.value_col, self.region_col, self.indicator_col, self.unit_col) if c]
         if len(used) != len(set(used)):
@@ -132,13 +161,22 @@ class ValidationReport(BaseModel):
 
     @property
     def blocking(self) -> bool:
-        """True while any error is unresolved."""
-        return any(i.severity == "error" and i.resolution == "pending" for i in self.issues)
+        """True while any error is not excluded or fixed (warnings never block)."""
+        return any(i.severity == "error" and i.resolution not in _ERROR_CLEARING for i in self.issues)
 
     def with_resolution(self, issue_id: str, resolution: Resolution) -> "ValidationReport":
-        """Copy of the report with one issue's resolution changed (KeyError if unknown)."""
+        """Copy of the report with one issue's resolution changed.
+
+        Raises KeyError for an unknown issue id, ValidationError for an invalid resolution value, and
+        ValueError when an error is "accepted" (errors can only be excluded or fixed).
+        """
         if not any(i.issue_id == issue_id for i in self.issues):
             raise KeyError(issue_id)
-        issues = [i.model_copy(update={"resolution": resolution}) if i.issue_id == issue_id else i
-                  for i in self.issues]
+        issues = []
+        for i in self.issues:
+            if i.issue_id == issue_id:
+                i = ValidationIssue.model_validate({**i.model_dump(), "resolution": resolution})
+                if i.severity == "error" and i.resolution == "accepted":
+                    raise ValueError(f"{issue_id}: errors can only be excluded or fixed, not accepted")
+            issues.append(i)
         return self.model_copy(update={"issues": issues})
