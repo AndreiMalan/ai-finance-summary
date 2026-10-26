@@ -26,7 +26,7 @@ dependencies = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-statbrief = ["storage/migrations/*.sql", "web/templates/*.html", "web/static/**/*"]
+statbrief = ["storage/migrations/*.sql", "web/templates/*.html", "web/static/**/*", "ingest/data/*.csv"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
