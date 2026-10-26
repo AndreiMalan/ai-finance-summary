@@ -6,15 +6,15 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M1-hardening
-task: final-review fixes (items 1-13)
-task_title: Fix M1 final review findings (7.5/10) on branch m1-hardening, then re-review, merge, start M2
-phase: reviewing
-branch: m1-hardening
-base_commit: 9e893de
-last_verified_commit: 52c5234
-plan: final review report (items listed in .superpowers/sdd/progress.md) ; M2 plan written: docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: M1 hardening re-review running (diff 9e893de..4bd343b). If APPROVED: merge m1-hardening to main, push, verify production healthz; then create branch m2-ingestion and execute docs/superpowers/plans/2026-10-26-m2-ingestion.md Task 1.
+milestone: M2
+task: 1
+task_title: Dependencies and domain contracts
+phase: implementing
+branch: m2-ingestion
+base_commit: BASE
+last_verified_commit: 517d707
+plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
+next_action: Task 1 implementer running; then review, then Tasks 2-9 in order (subagent-driven-development). After Task 9: deploy preview, set BLOB_BACKEND=vercel in Vercel (Production+Preview), live upload test, final review + QA + retro, merge.
 updated: 2026-10-26
 ```
 
@@ -47,8 +47,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 
 | Milestone | Status |
 |---|---|
-| M1 Skeleton, auth, limits, Vercel | ✅ all 7 tasks; merged to main |
-| M2 Schema + ingestion | 🔄 planning |
+| M1 Skeleton, auth, limits, Vercel | ✅ 7 tasks + hardening (final review 9.5/10, QA PASS); retro docs/retros/m1.md |
+| M2 Schema + ingestion | 🔄 implementing (plan: 9 tasks) |
 | M3–M9 | ⬜ not started |
 
 ## Completed tasks (append-only)
@@ -62,6 +62,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M1-T5 Signed session cookies | f5e81f2..f3004c7 | 10/10 |
 | M1-T6 Web app, auth UI, asset build | 53319f0..f6c861e | 9/10 |
 | M1-T7 Vercel entrypoint, spikes, deploy fixes | 71c71d4..ad86e83 | 9/10 |
+| M1 hardening (final review fixes) | 6cc6f90..4bd343b | 9.5/10 |
 
 ## External setup status
 
