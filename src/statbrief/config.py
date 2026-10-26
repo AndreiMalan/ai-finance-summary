@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     api_retries: int = Field(3, ge=0, le=10)  # extra attempts after 429/5xx/timeouts/invalid JSON
     api_backoff_s: float = Field(1.0, ge=0)  # first retry delay; doubles on every retry
     api_max_response_mb: int = Field(20, ge=1)  # larger responses are refused (memory guard)
+    worldbank_per_page: int = Field(1000, ge=1, le=20000)  # rows per World Bank page
+    worldbank_max_pages: int = Field(20, ge=1)  # more pages than this → error (no unbounded pagination)
 
     cron_secret: SecretStr = SecretStr("")
 
