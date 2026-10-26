@@ -160,3 +160,26 @@ def test_db_timeouts_defaults_and_validation():
     for field in ("db_connect_timeout_s", "db_pool_open_timeout_s"):
         with pytest.raises(ValidationError):
             _base(**{field: 0})
+
+
+def test_short_session_must_be_shorter_than_remember_session():
+    """SESSION_SHORT_MAX_AGE_HOURS must be below SESSION_MAX_AGE_DAYS * 24."""
+    assert _base(session_max_age_days=1, session_short_max_age_hours=23).session_short_max_age_hours == 23
+    for days, hours in ((1, 24), (30, 720), (2, 100)):
+        with pytest.raises(ValidationError, match="SESSION_SHORT_MAX_AGE_HOURS"):
+            _base(session_max_age_days=days, session_short_max_age_hours=hours)
+
+
+def test_get_settings_is_cached(monkeypatch):
+    """get_settings() reads the environment once and returns the same instance afterwards."""
+    from statbrief.config import get_settings
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+    monkeypatch.setenv("SESSION_SECRET", "s" * 32)
+    get_settings.cache_clear()
+    try:
+        first = get_settings()
+        monkeypatch.setenv("RUNS_PER_HOUR", "7")
+        assert get_settings() is first and first.runs_per_hour == 10
+    finally:
+        get_settings.cache_clear()

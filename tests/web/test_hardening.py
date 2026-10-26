@@ -256,3 +256,20 @@ def test_cold_start_with_unreachable_db_is_bounded_503(settings):
         r = c.get("/healthz")
         elapsed = time.monotonic() - start
     assert r.status_code == 503 and elapsed < 10
+
+
+def test_too_long_demo_password_is_logged_not_fatal(settings):
+    """A DEMO_USER_PASSWORD above PASSWORD_MAX_LENGTH is a demo config error (D-022), not a 500."""
+    bad = settings.model_copy(update={"demo_user_password": SecretStr("p" * (settings.password_max_length + 1))})
+    with TestClient(create_app(bad), follow_redirects=False) as c:
+        assert c.get("/login").status_code == 200
+        assert c.get("/healthz").json().get("demo_user") == "misconfigured"
+
+
+def test_remember_me_label_uses_configured_days(settings):
+    """The "Remember me" label shows SESSION_MAX_AGE_DAYS on both GET and failed-POST renders."""
+    custom = settings.model_copy(update={"session_max_age_days": 7})
+    with TestClient(create_app(custom), follow_redirects=False) as c:
+        assert "Remember me for 7 days" in c.get("/login").text
+        r = c.post("/login", data={"email": "nobody@example.com", "password": "wrong-wrong-1"})
+        assert r.status_code == 400 and "Remember me for 7 days" in r.text

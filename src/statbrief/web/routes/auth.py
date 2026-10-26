@@ -54,7 +54,8 @@ def login_form(request: Request, next: str | None = None):
         return RedirectResponse(_safe_next(next), status_code=303)
     rt = get_runtime(request)
     return templates.TemplateResponse(request, "login.html",
-                                      {"next": next or "", "signups_enabled": rt.settings.signups_enabled})
+                                      {"next": next or "", "signups_enabled": rt.settings.signups_enabled,
+                                       "session_max_age_days": rt.settings.session_max_age_days})
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -66,7 +67,8 @@ def login(request: Request, rt: Annotated[Runtime, Depends(get_runtime)],
     # One canonical key (normalised, then capped) is used for the throttle check, the recorded
     # attempt and the form echo; authenticate() still sees the raw value and normalises it itself.
     email_key = _login_key(email)
-    ctx = {"next": next, "email": email_key, "signups_enabled": s.signups_enabled}
+    ctx = {"next": next, "email": email_key, "signups_enabled": s.signups_enabled,
+           "session_max_age_days": s.session_max_age_days}
     if not login_allowed(rt.pool, email_key, ip, now, s.login_max_failures, timedelta(minutes=s.login_window_minutes)):
         ctx["error"] = f"Too many failed attempts. Try again in {s.login_window_minutes} minutes."
         return templates.TemplateResponse(request, "login.html", ctx, status_code=429)

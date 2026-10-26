@@ -74,6 +74,13 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _short_session_below_long_session(self) -> "Settings":
+        """Reject a non-remember session lifetime that is not shorter than the remember-me lifetime."""
+        if self.session_short_max_age_hours >= self.session_max_age_days * 24:
+            raise ValueError("SESSION_SHORT_MAX_AGE_HOURS must be below SESSION_MAX_AGE_DAYS * 24")
+        return self
+
+    @model_validator(mode="after")
     def _sse_diag_within_max_duration(self) -> "Settings":
         """Reject SSE diagnostics streams that could outlive the serverless function."""
         if self.sse_diag_ticks * self.sse_diag_interval_s >= SSE_DIAG_MAX_TOTAL_S:

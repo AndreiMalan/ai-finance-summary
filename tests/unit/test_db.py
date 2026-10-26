@@ -161,3 +161,24 @@ def test_pool_open_bounded_when_db_unreachable(settings):
     with pytest.raises(PoolTimeout):
         create_pool(s)
     assert time.monotonic() - start < 5
+
+
+def test_bootstrap_warns_in_prod_without_unpooled_url(settings, caplog):
+    """In prod, bootstrapping through the pooled URL (no DATABASE_URL_UNPOOLED) logs a WARNING."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="statbrief.storage.db"):
+        bootstrap(settings.model_copy(update={"app_env": "prod"}))
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING and "DATABASE_URL_UNPOOLED" in r.message]
+    assert len(warned) == 1
+    assert settings.database_url not in caplog.text  # never log the URL itself
+
+
+def test_bootstrap_no_warning_when_unpooled_set_or_not_prod(settings, db_url, caplog):
+    """No warning outside prod, nor in prod when DATABASE_URL_UNPOOLED is configured."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="statbrief.storage.db"):
+        bootstrap(settings)
+        bootstrap(settings.model_copy(update={"app_env": "prod", "database_url_unpooled": db_url}))
+    assert "DATABASE_URL_UNPOOLED" not in caplog.text

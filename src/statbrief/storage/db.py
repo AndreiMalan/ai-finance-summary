@@ -69,8 +69,12 @@ def bootstrap(settings: Settings) -> None:
     """Run app migrations and LangGraph setup on one short-lived direct connection.
 
     Uses `settings.bootstrap_database_url` (Neon's unpooled URL when configured) because the
-    session-level advisory lock is unsafe through a transaction-mode pooler.
+    session-level advisory lock is unsafe through a transaction-mode pooler. In prod a missing
+    DATABASE_URL_UNPOOLED is therefore logged as a WARNING (the URL itself is never logged).
     """
+    if settings.app_env == "prod" and not settings.database_url_unpooled:
+        logger.warning("DATABASE_URL_UNPOOLED is not set in prod: bootstrap falls back to DATABASE_URL; "
+                       "the session-level setup lock is unsafe through a transaction-mode pooler")
     with connect(settings.bootstrap_database_url, settings.db_connect_timeout_s) as conn:
         run_migrations(conn)
         setup_langgraph(conn, settings.db_setup_lock_timeout_s)

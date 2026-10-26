@@ -32,3 +32,18 @@ def test_sse_available_in_prod_when_enabled(settings):
     with TestClient(create_app(_prod(settings, enable_diag_endpoints=True))) as c:
         r = c.get("/_diag/sse")
     assert r.status_code == 200 and "event: done" in r.text
+
+
+def test_sse_prod_404_does_not_bootstrap_db(settings, monkeypatch):
+    """The prod 404 gate reads settings only; it never opens the database."""
+    from statbrief.web import runtime as runtime_mod
+
+    def no_bootstrap(_s):
+        """Fail the test if the request tries to bootstrap the database."""
+        raise AssertionError("bootstrap must not run for a hidden diag endpoint")
+
+    monkeypatch.setattr(runtime_mod, "bootstrap", no_bootstrap)
+    app = create_app(_prod(settings))
+    with TestClient(app, raise_server_exceptions=False) as c:
+        assert c.get("/_diag/sse").status_code == 404
+    assert app.state.runtime_holder._runtime is None

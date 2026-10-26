@@ -37,6 +37,11 @@ class RuntimeHolder:
         self._runtime: Runtime | None = None
         self._lock = threading.Lock()
 
+    @property
+    def settings(self) -> Settings:
+        """The app settings, available without opening the database (for cheap gate checks)."""
+        return self._settings
+
     def get(self) -> Runtime:
         """Open the pool, migrate, set up LangGraph tables and seed the demo user on first call."""
         if self._runtime is None:
@@ -49,7 +54,7 @@ class RuntimeHolder:
                     try:
                         if s.demo_user_email and s.demo_user_password:
                             upsert_demo_user(pool, s.demo_user_email, s.demo_user_password.get_secret_value(),
-                                             s.password_min_length)
+                                             s.password_min_length, s.password_max_length)
                     except _DEMO_CONFIG_ERRORS as exc:
                         # A bad demo setting must not take the whole site down: log, report via
                         # /healthz, and continue without the demo account.
