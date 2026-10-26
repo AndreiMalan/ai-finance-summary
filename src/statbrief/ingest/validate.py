@@ -4,6 +4,8 @@ Duplicate and conflict detection only considers rows without errors: a conflict 
 that has an error surfaces once that error is fixed (the error itself is already reported). A gap
 (missing value, None) and a value for the same indicator, region and period is a conflict, and so
 is the same number in units of a different scale ("5 EUR" vs "5 thousand EUR").
+`duplicate_row` (identical rows) is a warning listing only the later occurrences; normalization always
+excludes those rows (they appear in its excluded-rows list) and keeps the first occurrence (D-027).
 """
 from collections import defaultdict
 from collections.abc import Iterable

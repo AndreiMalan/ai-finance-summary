@@ -1,6 +1,7 @@
 """Turn validated rows into Observations with upload provenance; every exclusion is listed with reasons.
 
-The report must belong to this file and table (same file_id and row count) or ValueError is raised.
+The report must belong to this file and table (same file_id and row count) or StaleReport (a ValueError)
+is raised.
 The table is always validated afresh; the passed report only contributes its resolutions, copied onto
 the fresh issues by issue_id (fresh issues it lacks stay "pending"). Issue rows therefore always come
 from the fresh validation, never from the report's possibly stale row lists. Normalization refuses to
@@ -12,6 +13,8 @@ once (deduplicated by issue/problem code):
   whatever the issue's resolution — "accepting" the duplicate_row warning still keeps only the first;
 - it belongs to an issue (error or warning) resolved as "excluded";
 - it still has a row-level error after parsing (a safety net; such errors are normally excluded issues).
+`ValidationReport.blocking` (where "fixed" clears an error) is only the UI's pre-check; this module is the
+authority, and a "fixed" error clears only when re-validating the corrected data no longer finds it (D-027).
 """
 from dataclasses import dataclass, field
 
