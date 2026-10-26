@@ -1,4 +1,5 @@
-"""Shared fixtures: embedded Postgres, one fresh database per test, settings."""
+"""Shared fixtures: embedded Postgres, one fresh database per test, settings; live-API test gating."""
+import os
 import tempfile
 import uuid
 
@@ -6,6 +7,16 @@ import psycopg
 import pytest
 
 from statbrief.config import Settings
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip tests marked `live` (real network calls) unless RUN_LIVE_TESTS=1."""
+    if os.environ.get("RUN_LIVE_TESTS") == "1":
+        return
+    skip = pytest.mark.skip(reason="live API test: set RUN_LIVE_TESTS=1 to run")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)

@@ -140,13 +140,13 @@ class CacheScope:
     report_id: str
 
 
-def _utc_now() -> datetime:
+def utc_now() -> datetime:
     """Current time in UTC (aware)."""
     return datetime.now(timezone.utc)
 
 
 def cached_fetch(scope: CacheScope | None, source: str, url: str, params: Params,
-                 fetch: Callable[[], tuple[Any, str]], *, now: Callable[[], datetime] = _utc_now) -> CachedResponse:
+                 fetch: Callable[[], tuple[Any, str]], *, now: Callable[[], datetime] = utc_now) -> CachedResponse:
     """Return the report's cached response for this request, or call `fetch` and cache its result.
 
     Without a scope nothing is cached. `fetch` returns (payload, final_url) and may raise SourceError,
