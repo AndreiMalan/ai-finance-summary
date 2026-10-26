@@ -1,0 +1,168 @@
+EUROPEAN STATISTICAL METHODS BOARD
+
+ESMB DATA QUALITY AND REVISIONS POLICY
+
+Version 3.0. Adopted by the Plenary on 20 June 2024. Replaces version 2.2 of 2019.
+
+
+1. PURPOSE AND SCOPE
+
+1.1 Purpose
+This policy sets out the quality framework and the revision rules that apply to
+all statistics compiled under ESMB standards by the Member Statistical
+Authorities (MSAs). It aims to ensure that users can judge the fitness for
+purpose of each statistic and can understand why and when published figures
+change.
+
+1.2 Scope
+The policy covers official statistics produced by MSAs and transmitted under
+ESMB regulations, including price statistics, labour market statistics,
+national accounts and regional statistics. It also applies to the derived
+indicators and commentary that accompany those statistics.
+
+
+2. QUALITY DIMENSIONS
+
+2.1 Framework
+The quality of a statistic is assessed along the five dimensions set out below.
+Each MSA shall publish a quality report for every statistical domain at least
+every three years, structured along these dimensions.
+
+2.2 Relevance
+The degree to which statistics meet current and potential needs of users.
+MSAs shall consult users regularly and document the concepts, definitions and
+classifications used, including any departure from ESMB standards.
+
+2.3 Accuracy and reliability
+Accuracy is the closeness of an estimate to the unknown true value. It is
+affected by sampling errors and by non-sampling errors such as coverage,
+measurement, non-response and processing errors. Reliability is the closeness
+of the first published estimate to subsequent estimates of the same quantity.
+It is measured through revision analysis (Section 5).
+
+2.4 Timeliness and punctuality
+Timeliness is the time between the end of the reference period and the
+publication of the statistic. Punctuality is the time lag between the actual
+and the announced release date. MSAs shall publish release calendars in
+advance and report any deviation from them.
+
+2.5 Coherence and comparability
+Coherence is the extent to which statistics from different sources or of
+different frequency can be reliably combined. Comparability covers comparison
+over time and across regions and countries. Differences in definitions,
+base years, units, seasonal adjustment or territorial classification shall be
+documented next to the data. Series that differ in any of these respects shall
+not be combined without explicit conversion.
+
+2.6 Accessibility and clarity
+Statistics shall be available in machine-readable form with metadata that
+explain concepts, units, sources and methods. Every column or variable in a
+disseminated file shall be defined in the accompanying metadata. Variables for
+which no definition exists shall not be disseminated as official statistics.
+
+
+3. REVISIONS
+
+3.1 Principles
+Revisions are a normal consequence of the statistical process. They improve
+accuracy as more complete information becomes available. MSAs shall follow
+the principles of transparency (revisions are announced and explained),
+predictability (routine revisions follow a published timetable) and
+consistency (revised data are released for all affected periods and series
+at the same time).
+
+3.2 Routine revisions
+Routine revisions are scheduled revisions that incorporate late or more
+complete source data, updated seasonal factors or revised weights. Examples
+are the revision of the previous month's provisional regional indicators in
+the following monthly release and the incorporation of annual data in
+quarterly national accounts.
+
+3.3 Major revisions
+Major (benchmark) revisions follow changes in concepts, definitions,
+classifications, methods, base years or reference years. They are announced at
+least three months in advance, together with an explanation of their expected
+impact, and are accompanied by complete back series.
+
+3.4 Error corrections
+Errors discovered after publication shall be corrected as soon as possible. The
+correction shall be announced on the dissemination page of the statistic,
+stating the periods and series affected, the nature of the error and the size
+of the correction. Corrections are not scheduled and are distinct from routine
+revisions.
+
+3.5 Rebasing
+A change of index reference period (base year) is a major revision in form but
+not in substance: index levels change while rates of change remain the same
+except for rounding. Rebased series shall carry the new base in the unit of
+measure, for example "index, 2021=100", so that series on different bases
+cannot be confused.
+
+
+4. FLAGS AND SPECIAL VALUES
+
+4.1 Observation flags
+The following flags shall be attached to observations where applicable:
+
+  Flag   Meaning
+  ----   -------------------------------------------------------------
+  p      provisional value, expected to be revised
+  e      estimated value
+  b      break in time series
+  c      confidential value, not published
+  u      low reliability
+  d      definition differs from the standard definition
+  :      not available
+
+4.2 Missing values
+A missing value shall be left empty or shown with the symbol ":" and shall
+never be replaced by zero. A zero means that the quantity is zero or rounds to
+zero.
+
+4.3 Rounding
+Published values are rounded independently. Totals may therefore differ from
+the sum of their rounded components. Rates of change shall be computed from
+unrounded or less rounded data and not from the rounded published values,
+unless a regulation prescribes otherwise.
+
+
+5. REVISION ANALYSIS
+
+5.1 Vintages
+MSAs shall keep a record of every published version (vintage) of their
+principal series so that revisions can be analysed and users can reproduce
+earlier analyses.
+
+5.2 Measures
+The following measures shall be computed at least annually for each principal
+indicator, comparing first published and later estimates:
+  - mean revision (average of later minus first estimate), an indicator of bias;
+  - mean absolute revision, an indicator of the size of revisions;
+  - the share of revisions that change the sign of a growth rate.
+
+5.3 Interpretation by users
+A change between two periods that is smaller than the mean absolute revision
+of the indicator should be described with caution, because it may disappear
+when the data are revised.
+
+
+6. METADATA AND DOCUMENTATION
+
+6.1 Reference metadata
+Each dataset shall be accompanied by reference metadata describing the
+contact organisation, concepts and definitions, statistical population,
+reference period, unit of measure, base period, source data, frequency,
+timeliness, revision policy and quality management.
+
+6.2 Undocumented content
+Where a file received from a third party contains variables that are not
+described in its metadata, the producer or user shall treat those variables as
+of unknown meaning. They may be listed, but no statistical interpretation shall
+be attached to them until their definition has been obtained from the data
+provider.
+
+
+7. ENTRY INTO FORCE
+
+This policy enters into force on 1 September 2024. MSAs shall publish their
+first quality reports under version 3.0 no later than 31 December 2025.
