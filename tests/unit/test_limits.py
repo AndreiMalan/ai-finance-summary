@@ -123,18 +123,22 @@ def test_consume_is_atomic_under_concurrency(wide_pool):
     a = create_user(wide_pool, "a@example.com", "long-enough-pw", 10, 128)
     since = hour_ago(NOW)
     barrier = threading.Barrier(N_THREADS)
-    results, lock = [], threading.Lock()
+    results, errors, lock = [], [], threading.Lock()
 
     def worker():
-        """Wait for all threads, then try to consume once and record the outcome."""
-        barrier.wait()
+        """Wait for all threads, then try to consume once and record the outcome (or error)."""
         try:
-            consume(wide_pool, a.id, KIND_REPORT_RUN, CONCURRENT_LIMIT, since, NOW)
-            outcome = "ok"
-        except LimitExceeded:
-            outcome = "limited"
-        with lock:
-            results.append(outcome)
+            barrier.wait()
+            try:
+                consume(wide_pool, a.id, KIND_REPORT_RUN, CONCURRENT_LIMIT, since, NOW)
+                outcome = "ok"
+            except LimitExceeded:
+                outcome = "limited"
+            with lock:
+                results.append(outcome)
+        except BaseException as exc:  # surfaced below; a thread's exception is otherwise lost
+            with lock:
+                errors.append(exc)
 
     threads = [threading.Thread(target=worker) for _ in range(N_THREADS)]
     with wide_pool.connection() as holder, holder.transaction():
@@ -144,6 +148,9 @@ def test_consume_is_atomic_under_concurrency(wide_pool):
         _wait_for_lock_waiters(wide_pool, N_THREADS)
     for t in threads:
         t.join(timeout=WAIT_TIMEOUT_S)
+    assert not any(t.is_alive() for t in threads), "worker threads did not finish"
+    assert errors == []
+    assert len(results) == N_THREADS
     assert results.count("ok") == CONCURRENT_LIMIT
     assert results.count("limited") == N_THREADS - CONCURRENT_LIMIT
     with wide_pool.connection() as c:

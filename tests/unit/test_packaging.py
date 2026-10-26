@@ -29,3 +29,42 @@ def test_vercel_single_region():
     """Functions are pinned to exactly one region (Hobby allows one; co-located with Neon)."""
     cfg = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
     assert isinstance(cfg["regions"], list) and len(cfg["regions"]) == 1
+
+
+def test_vercel_max_duration_exceeds_sse_diag_cap():
+    """The function maxDuration leaves room above the SSE diagnostics cap (SSE_DIAG_MAX_TOTAL_S)."""
+    from statbrief.config import SSE_DIAG_MAX_TOTAL_S
+
+    cfg = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
+    assert cfg["functions"]["app.py"]["maxDuration"] > SSE_DIAG_MAX_TOTAL_S
+
+
+def test_static_assets_bundled():
+    """The compiled stylesheet and vendored htmx/Alpine ship inside the package."""
+    static = ROOT / "src" / "statbrief" / "web" / "static"
+    for rel in ("app.css", "vendor/htmx.min.js", "vendor/alpine.min.js"):
+        f = static / rel
+        assert f.is_file() and f.stat().st_size > 0, rel
+
+
+def test_app_entrypoint_imports(monkeypatch):
+    """Root app.py imports with only env configuration and exposes an ASGI `app` (no DB opened)."""
+    import importlib.util
+    import sys
+
+    from fastapi import FastAPI
+
+    from statbrief.config import get_settings
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@127.0.0.1:1/x")
+    monkeypatch.setenv("SESSION_SECRET", "s" * 32)
+    monkeypatch.setattr(sys, "path", list(sys.path))  # app.py prepends src/; undo afterwards
+    get_settings.cache_clear()
+    try:
+        spec = importlib.util.spec_from_file_location("statbrief_app_smoke", ROOT / "app.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert isinstance(module.app, FastAPI)
+        assert module.app.state.runtime_holder._runtime is None
+    finally:
+        get_settings.cache_clear()

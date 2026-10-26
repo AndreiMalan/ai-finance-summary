@@ -79,3 +79,11 @@ Rationale: the Python SDK supports private put/get/delete with OIDC but not clie
 ## D-022 — A misconfigured demo account never takes the site down
 2026-10-26 · Supersedes the "fail loudly at startup" choice made in M1 Task 6. If `DEMO_USER_EMAIL`/`DEMO_USER_PASSWORD` are invalid (bad email, password outside the length bounds, or the email belongs to a regular account) the error is logged, `/healthz` reports `"demo_user": "misconfigured"`, and the app keeps serving without the demo account. Infrastructure errors during start-up still fail (and close the pool).
 Rationale: production incident 2026-10-26 — a 9-character demo password made every page return 500.
+
+## D-023 — Bounded, self-healing database connections
+2026-10-26 · Pooled connections are checked on checkout (`ConnectionPool.check_connection`) so backends Neon closes while idle are replaced instead of failing a request. Every connection carries libpq `connect_timeout` (`DB_CONNECT_TIMEOUT_S`, default 5 s, rounded up to whole seconds), and `pool.open` waits at most `DB_POOL_OPEN_TIMEOUT_S` (default 10 s). `/healthz` reports 503 for database errors, `PoolTimeout` and the LangGraph setup-lock `TimeoutError`. In prod a missing `DATABASE_URL_UNPOOLED` is logged as a warning at bootstrap.
+Rationale: final M1 review — a cold start with the database down was unbounded and returned 500; stale pooled connections after Neon scale-to-zero caused errors.
+
+## D-024 — Login throttle key is the normalised email
+2026-10-26 · The per-email login throttle key is `normalize_email(raw)` (falling back to `raw.strip().lower()` for invalid input), then capped at 254 characters; the same key is recorded and echoed in the form.
+Rationale: final M1 review — truncating before normalising let whitespace-padded or re-cased variants of one address each get a fresh failure budget (AC 4 bypass).
