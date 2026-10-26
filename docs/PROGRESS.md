@@ -6,15 +6,15 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M2
+milestone: M3 ∥ M5
 task: 9
 task_title: Upload & ingestion JSON API + template download
-phase: fixing
+phase: implementing
 branch: m2-ingestion
 base_commit: 163a834
 last_verified_commit: f8264af
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: M2 final-review fix round running (Important 1-5 + minors 6-10). Gate = full suite + new tests (no re-review, D-026). Then preview deploy + live upload test, merge to main. M3 and M5 run in parallel worktrees (branched from m2-ingestion) — see plans 2026-10-26-m3-api-sources.md and -m5-rag.md.
+next_action: M2 merged. M3 and M5 developers running in worktrees (see Parallel streams). When each reports: single review (D-026), fixes, merge into main (rebase on main first), preview check.
 updated: 2026-10-26
 ```
 
@@ -33,7 +33,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 
 | Stream | Worktree | Branch | Base | Status |
 |---|---|---|---|---|
-| M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | 🔄 developer running |
+| M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | 🔄 developer running |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | 🔄 developer running |
 
@@ -58,7 +58,7 @@ Resume rule: for each stream, check its branch log + uncommitted files in its wo
 | Milestone | Status |
 |---|---|
 | M1 Skeleton, auth, limits, Vercel | ✅ 7 tasks + hardening (final review 9.5/10, QA PASS); retro docs/retros/m1.md |
-| M2 Schema + ingestion | 🔄 implementing (plan: 9 tasks) |
+| M2 Schema + ingestion | ✅ merged to main (live upload test passed on preview) |
 | M3–M9 | ⬜ not started |
 
 ## Completed tasks (append-only)
@@ -81,6 +81,7 @@ Resume rule: for each stream, check its branch log + uncommitted files in its wo
 | M2-T6 Row parsing + validation | 85d0e8d..45054fd | 9/10 (after fix round from 7/10) |
 | M2-T7 Normalization | a51ffd2..813e6e2 | 10/10 (after 3 review cycles) |
 | M2-T8 Storage, repos, blobs | 308aea6..f8264af | 10/10 (after hardening) |
+| M2-T9 Upload API + final-review fixes | b9e3d17..44be29a | final review 7.5/10 → fixes verified by 582 tests + live Vercel upload test |
 
 ## External setup status
 
