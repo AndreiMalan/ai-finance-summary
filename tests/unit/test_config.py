@@ -222,3 +222,27 @@ def test_ingestion_limit_settings_defaults_and_validation():
                 {"max_columns_per_file": 0}, {"preview_rows": 0}, {"preview_rows": 501}):
         with pytest.raises(ValidationError):
             Settings(**base, **bad)
+
+
+def test_rag_settings_defaults_and_validation():
+    """RAG tunables (M5) have the planned defaults and reject inconsistent chunking."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert s.enable_vector_search is True
+    assert (s.embeddings_provider, s.embeddings_model, s.embedding_dimensions) == (
+        "openai", "text-embedding-3-small", 1536)
+    assert (s.rag_top_k, s.rag_chunk_size, s.rag_chunk_overlap) == (6, 1200, 150)
+    assert s.openai_api_key is None and s.max_reference_mb == 10 and s.max_reference_pages >= 1
+    with pytest.raises(ValidationError):
+        Settings(database_url="postgresql://x/y", session_secret="s" * 32, rag_chunk_size=200,
+                 rag_chunk_overlap=200, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(database_url="postgresql://x/y", session_secret="s" * 32, embedding_dimensions=4096,
+                 _env_file=None)  # pgvector HNSW indexes at most 2000 dimensions
+
+
+def test_openai_key_is_secret(monkeypatch):
+    """OPENAI_API_KEY is read from the environment as a SecretStr (never printed)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-123")
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert s.openai_api_key.get_secret_value() == "sk-test-123"
+    assert "sk-test-123" not in repr(s)
