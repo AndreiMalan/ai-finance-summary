@@ -33,7 +33,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(LoginRequired)
     async def _login_required(request: Request, _exc: LoginRequired) -> Response:
-        """Redirect to login; HTMX requests get an HX-Redirect header instead."""
+        """Redirect to login; HTMX requests get an HX-Redirect header; JSON API calls get 401 JSON."""
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"detail": "login required"}, status_code=401)
         target = "/login?next=" + quote(request.url.path)
         if request.headers.get("HX-Request") == "true":
             return Response(status_code=401, headers={"HX-Redirect": target})
@@ -64,9 +66,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             body["demo_user"] = "misconfigured"
         return JSONResponse(body, status_code=200 if ok else 503)
 
-    from statbrief.web.routes import auth, diag, pages
+    from statbrief.web.routes import auth, diag, pages, uploads
 
     app.include_router(auth.router)
     app.include_router(pages.router)
     app.include_router(diag.router)
+    app.include_router(uploads.router)
     return app

@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     daily_llm_call_cap: int = Field(500, ge=1)
     max_upload_mb: int = Field(10, ge=1)
     max_files_per_report: int = Field(5, ge=1)
+    upload_chunk_mb: float = Field(4.0, gt=0, le=4.4)  # below Vercel's 4.5 MB request body limit (D-021)
+    max_uncompressed_ratio: int = Field(100, ge=2)  # zip-bomb guard for .xlsx
+    max_uncompressed_mb: int = Field(200, ge=1)  # absolute expansion cap for .xlsx
+    max_rows_per_file: int = Field(200_000, ge=1)  # non-empty rows kept per table
+    max_scan_rows_per_file: int = Field(1_000_000, ge=1)  # rows scanned incl. empty ones (gap-row DoS guard)
+    max_columns_per_file: int = Field(500, ge=1)  # widest accepted row (memory guard)
+    preview_rows: int = Field(50, ge=1, le=500)  # data rows returned by the file preview
 
     blob_backend: Literal["local", "vercel"] = "local"  # "vercel" = private Vercel Blob store (D-021)
     local_blob_dir: str = ".local_blobs"  # root directory of the local blob store (dev/tests)

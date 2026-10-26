@@ -1,4 +1,4 @@
-"""Per-app runtime (settings + DB pool) initialised lazily, once per serverless instance."""
+"""Per-app runtime (settings + DB pool + blob store) initialised lazily, once per serverless instance."""
 import logging
 import threading
 from dataclasses import dataclass
@@ -7,6 +7,7 @@ from psycopg_pool import ConnectionPool
 
 from statbrief.auth.users import DemoEmailConflict, InvalidEmail, WeakPassword, upsert_demo_user
 from statbrief.config import Settings
+from statbrief.storage.blobs import BlobStore, get_blob_store
 from statbrief.storage.db import bootstrap, create_pool
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class Runtime:
 
     settings: Settings
     pool: ConnectionPool
+    blobs: BlobStore  # private store for uploaded files (D-021)
     demo_error: str | None = None  # user-safe reason the demo account could not be seeded
 
     def close(self) -> None:
@@ -43,11 +45,12 @@ class RuntimeHolder:
         return self._settings
 
     def get(self) -> Runtime:
-        """Open the pool, migrate, set up LangGraph tables and seed the demo user on first call."""
+        """Open the blob store and the pool, migrate, set up LangGraph tables and seed the demo user on first call."""
         if self._runtime is None:
             with self._lock:
                 if self._runtime is None:
                     bootstrap(self._settings)
+                    blobs = get_blob_store(self._settings)  # before the pool: nothing to leak if it fails
                     pool = create_pool(self._settings)
                     s = self._settings
                     demo_error = None
@@ -65,7 +68,7 @@ class RuntimeHolder:
                         # Infrastructure failure: never leak the pool on retries.
                         pool.close()
                         raise
-                    self._runtime = Runtime(settings=s, pool=pool, demo_error=demo_error)
+                    self._runtime = Runtime(settings=s, pool=pool, blobs=blobs, demo_error=demo_error)
         return self._runtime
 
     def close(self) -> None:

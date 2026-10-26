@@ -204,3 +204,21 @@ def test_prod_requires_vercel_blob_backend():
     assert Settings(app_env="prod", blob_backend="vercel", **base).blob_backend == "vercel"
     assert Settings(app_env="dev", **base).blob_backend == "local"
     assert Settings(app_env="test", blob_backend="vercel", **base).blob_backend == "vercel"
+
+
+def test_ingestion_limit_settings_defaults_and_validation():
+    """Upload/ingestion limits default to the agreed values; chunks stay below Vercel's 4.5 MB body (D-021)."""
+    base = {"database_url": "postgresql://x/y", "session_secret": "s" * 32, "_env_file": None}
+    s = Settings(**base)
+    assert s.upload_chunk_mb == 4.0
+    assert s.max_uncompressed_ratio == 100
+    assert s.max_uncompressed_mb == 200
+    assert s.max_rows_per_file == 200_000
+    assert s.max_scan_rows_per_file == 1_000_000
+    assert s.max_columns_per_file == 500
+    assert s.preview_rows == 50
+    for bad in ({"upload_chunk_mb": 0}, {"upload_chunk_mb": 4.5}, {"max_uncompressed_ratio": 1},
+                {"max_uncompressed_mb": 0}, {"max_rows_per_file": 0}, {"max_scan_rows_per_file": 0},
+                {"max_columns_per_file": 0}, {"preview_rows": 0}, {"preview_rows": 501}):
+        with pytest.raises(ValidationError):
+            Settings(**base, **bad)
