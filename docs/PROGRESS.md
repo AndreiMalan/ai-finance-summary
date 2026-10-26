@@ -9,7 +9,7 @@ This file is updated at **every** step transition (task dispatched, implemented,
 milestone: M2
 task: 3
 task_title: Readers (csv/xlsx/xls/json, grid, worksheets, header to table)
-phase: implementing
+phase: fixing
 branch: m2-ingestion
 base_commit: 63d6976
 last_verified_commit: 63d6976

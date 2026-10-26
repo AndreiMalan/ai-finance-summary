@@ -2897,6 +2897,7 @@ class ObservationRepo:
     max_uncompressed_ratio: int = Field(100, ge=2)      # zip-bomb guard for .xlsx
     max_uncompressed_mb: int = Field(200, ge=1)         # absolute expansion cap for .xlsx (Task 2 review)
     max_rows_per_file: int = Field(200_000, ge=1)
+    max_scan_rows_per_file: int = Field(1_000_000, ge=1)  # rows scanned incl. empty ones (xlsx gap-row DoS guard, Task 3 review)
     preview_rows: int = Field(50, ge=1, le=500)
 ```
 
@@ -3169,7 +3170,7 @@ def _file_or_404(rt: Runtime, user: User, file_id: str) -> DatasetRef:
 def _grid(rt: Runtime, ref: DatasetRef, worksheet: str | None):
     """Read the stored file into a grid."""
     return read_grid(rt.blobs.get(ref.blob_key), ref.kind, worksheet=worksheet,
-                     max_rows=rt.settings.max_rows_per_file)
+                     max_rows=rt.settings.max_rows_per_file, max_scan_rows=rt.settings.max_scan_rows_per_file)
 
 
 @router.post("/reports", status_code=201, dependencies=[Guard])
