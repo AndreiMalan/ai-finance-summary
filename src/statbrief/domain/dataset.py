@@ -18,6 +18,8 @@ Resolution = Literal["pending", "excluded", "fixed", "accepted"]
 # Resolutions that clear an error; "accepted" is only meaningful for warnings.
 ERROR_CLEARING_RESOLUTIONS: frozenset[str] = frozenset({"excluded", "fixed"})
 _CONSTANT_ROLES = ("region", "indicator", "unit")
+# Reader meta flags meaning the data was repaired or decoded on a guess: the user must review it.
+REVIEW_META_FLAGS = ("nul_removed", "encoding_suspect")
 
 
 class DatasetRef(BaseModel):
@@ -136,10 +138,12 @@ class DetectedSchema(BaseModel):
             return None  # missing region/indicator/unit: the user must supply constants
 
     def needs_review(self, threshold: float) -> bool:
-        """True when the header or any mapped role is below `threshold`, or the suggestion is incomplete."""
+        """True when the header or any mapped role is below `threshold`, the suggestion is incomplete, or
+        the reader had to repair the data (`meta` flags such as `nul_removed` or `encoding_suspect`)."""
         mapped = [c for c in self.columns if c.role != "ignore"]
         return (self.header_confidence < threshold or self.suggested_mapping() is None
-                or any(c.confidence < threshold for c in mapped))
+                or any(c.confidence < threshold for c in mapped)
+                or any(self.meta.get(flag) for flag in REVIEW_META_FLAGS))
 
 
 class ValidationIssue(BaseModel):

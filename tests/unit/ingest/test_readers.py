@@ -416,3 +416,25 @@ def test_csv_cr_only_larger_than_sniff_sample():
     data = b"a;b\r" + b"".join(f"{i};{i}\r".encode() for i in range(2000))
     g = read_grid(data, "csv")
     assert g.meta["delimiter"] == ";" and len(g.rows) == 2001 and g.rows[-1] == ["1999", "1999"]
+
+
+def test_json_nul_characters_removed_from_cells_and_keys():
+    """NULs inside JSON values and keys are stripped (all readers share `_append`) and flagged."""
+    data = json.dumps([{"ind\u0000": "HI\u0000CP", "v": 1}]).encode()
+    g = read_grid(data, "json")
+    assert g.rows == [["ind", "v"], ["HICP", 1]] and g.meta["nul_removed"] is True
+    assert "nul_removed" not in read_grid(json.dumps([{"a": "x"}]).encode(), "json").meta
+
+
+def test_nul_only_cell_counts_as_empty():
+    """A cell that is only NULs becomes empty, so the row is skipped like any empty row."""
+    g = read_grid(json.dumps([{"a": "x"}, {"a": "\u0000"}]).encode(), "json")
+    assert g.rows == [["a"], ["x"]]
+
+
+@pytest.mark.parametrize("doc", [[{"a": "\ud800"}], [{"\udfff": 1}], [{"a": {"n": "\ud800"}}]])
+def test_lone_surrogates_rejected(doc):
+    """Strings that cannot be encoded as UTF-8 (lone surrogates) are refused as malformed, not a 500 later."""
+    with pytest.raises(UploadRejected) as e:
+        read_grid(json.dumps(doc).encode(), "json")
+    assert e.value.code == "malformed"

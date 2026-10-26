@@ -3,7 +3,7 @@ import pytest
 
 from statbrief.domain.dataset import ColumnMapping, DatasetRef
 from statbrief.domain.observation import make_obs_id
-from statbrief.ingest.normalize import UnresolvedIssues, to_observations
+from statbrief.ingest.normalize import StaleReport, UnresolvedIssues, to_observations
 from statbrief.ingest.readers import RawTable
 from statbrief.ingest.validate import validate_table
 
@@ -152,8 +152,9 @@ def test_mismatched_report_rejected(update):
     """A report for another file or another table shape is refused."""
     t = _t([["2024-01", "Cluj", "HICP", "1", "%"]])
     report = validate_table(t, MAP, "f1").model_copy(update=update)
-    with pytest.raises(ValueError):
+    with pytest.raises(StaleReport):  # a ValueError subclass, so callers can catch only this case
         to_observations(t, MAP, REF, report)
+    assert issubclass(StaleReport, ValueError)
 
 
 def test_unit_multiplier_carried_value_not_scaled():

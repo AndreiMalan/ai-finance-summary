@@ -177,3 +177,14 @@ def test_header_without_role_hints_has_low_header_confidence():
 def test_header_with_role_hints_has_full_header_confidence():
     """A header naming known roles keeps header confidence 1.0."""
     assert detect_schema(_irs_grid(), **KW).header_confidence == 1.0
+
+
+@pytest.mark.parametrize("flag", ["nul_removed", "encoding_suspect"])
+def test_reader_warnings_force_review(flag):
+    """A grid the reader had to repair (NULs removed, suspect encoding) always needs user review."""
+    rows = [["date", "region", "indicator", "value", "unit"], ["2024-01", "RO", "HICP", "1.5", "%"],
+            ["2024-02", "RO", "HICP", "1.6", "%"]]
+    clean = detect_schema(Grid(rows=rows, row_numbers=[1, 2, 3]), **KW)
+    assert not clean.needs_review(0.0)
+    flagged = detect_schema(Grid(rows=rows, row_numbers=[1, 2, 3], meta={flag: True}), **KW)
+    assert flagged.meta[flag] is True and flagged.needs_review(0.0)

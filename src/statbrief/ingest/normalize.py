@@ -28,6 +28,10 @@ _ALWAYS_EXCLUDED_CODES: frozenset[str] = frozenset({"duplicate_row"})
 _EXCLUDED = "excluded"
 
 
+class StaleReport(ValueError):
+    """The validation report was produced for another file or another table: validate again."""
+
+
 class UnresolvedIssues(Exception):
     """Normalization was attempted while errors are still unresolved (the report is blocking)."""
 
@@ -65,11 +69,11 @@ def _blocking_ids(issues: list[ValidationIssue]) -> list[str]:
 
 
 def _check_report_matches(table: RawTable, ref: DatasetRef, report: ValidationReport) -> None:
-    """Raise ValueError when the report was produced for another file or another table."""
+    """Raise StaleReport when the report was produced for another file or another table."""
     if report.file_id != ref.file_id:
-        raise ValueError(f"report is for file {report.file_id!r}, not {ref.file_id!r}")
+        raise StaleReport(f"report is for file {report.file_id!r}, not {ref.file_id!r}")
     if report.row_count != len(table.rows):
-        raise ValueError(f"report covers {report.row_count} rows, table has {len(table.rows)}")
+        raise StaleReport(f"report covers {report.row_count} rows, table has {len(table.rows)}")
 
 
 def _issue_reasons(issues: list[ValidationIssue]) -> dict[int, dict[str, str]]:
@@ -111,7 +115,7 @@ def to_observations(table: RawTable, mapping: ColumnMapping, ref: DatasetRef,
                     report: ValidationReport) -> NormalizationResult:
     """Normalize a table whose errors have all been resolved; every excluded row is listed with reasons.
 
-    Raises ValueError when the report does not match `ref`/`table`, and UnresolvedIssues with the ids of
+    Raises StaleReport (a ValueError) when the report does not match `ref`/`table`, and UnresolvedIssues with the ids of
     fresh errors not resolved "excluded" (in fresh validation order). The table is parsed once; the parsed
     rows feed both the fresh validation and the observations.
     """

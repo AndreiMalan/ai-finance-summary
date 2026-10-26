@@ -40,6 +40,7 @@ _MACRO_SHEET_TYPES = frozenset({0x01, 0x06})  # Excel 4.0 (XLM) macro sheet, Vis
 _MIN_SCANNED_BIFF_VERSION = 50  # BIFF5+: BOUNDSHEET records carry the sheet type
 _PASSWORD_MESSAGE = ("This workbook is password-protected or encrypted. "
                      "Remove the password in Excel and upload it again.")
+_INVALID_CHARS_MESSAGE = "The file contains invalid characters."
 _MACRO_MESSAGE = "Workbooks containing macros are not accepted. Save it as a plain .xlsx without macros."
 
 
@@ -101,16 +102,36 @@ class _Limits:
     max_columns: int | None = None  # position of a row's last non-empty cell
 
 
+def _clean_text(grid: Grid, value: Any) -> Any:
+    """Strip NULs from a string cell (flagging `meta["nul_removed"]`); refuse text that is not valid Unicode.
+
+    Lone surrogates (e.g. "\\ud800" in JSON) cannot be encoded as UTF-8, so they would fail later in
+    Postgres or JSON responses; they are refused here as malformed instead.
+    """
+    if not isinstance(value, str):
+        return value
+    if "\x00" in value:
+        value = value.replace("\x00", "")
+        grid.meta["nul_removed"] = True
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise UploadRejected("malformed", _INVALID_CHARS_MESSAGE) from None
+    return value
+
+
 def _append(grid: Grid, cells: list[Any], row_number: int, limits: _Limits) -> None:
     """Add a non-empty row, enforcing the scanned-row, column and row limits.
 
     `row_number` is the 1-based position in the source, so every scanned row (including empty
     ones) counts toward `max_scan_rows`. Trailing empty cells are trimmed before the column check,
-    so the cap applies to the last non-empty cell and no over-wide row is ever kept.
+    so the cap applies to the last non-empty cell and no over-wide row is ever kept. Every reader
+    goes through here, so string cells (headers and JSON keys included) are cleaned by `_clean_text`.
     """
     if limits.max_scan_rows is not None and row_number > limits.max_scan_rows:
         raise UploadRejected("too_large",
                              f"The file has more than {limits.max_scan_rows} rows (including empty ones).")
+    cells = [_clean_text(grid, c) for c in cells]
     while cells and _is_empty(cells[-1]):
         cells.pop()
     if not cells or all(_is_empty(c) for c in cells):
