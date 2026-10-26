@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import psycopg
+from psycopg_pool import PoolTimeout
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -52,7 +53,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                           (str(max(1, round(timeout_s * 1000))),))
                 ok = c.execute("SELECT 1 AS one").fetchone()["one"] == 1
             demo_error = rt.demo_error
-        except psycopg.Error as exc:  # psycopg_pool errors (PoolTimeout, PoolClosed) subclass this
+        # psycopg.Error covers connection failures (and psycopg_pool errors, which subclass it);
+        # PoolTimeout is listed explicitly for clarity; TimeoutError is the setup-lock timeout.
+        except (psycopg.Error, PoolTimeout, TimeoutError) as exc:
             # Log only the exception class: messages can echo connection details.
             logger.warning("healthz database check failed: %s", type(exc).__name__)
             ok = False

@@ -76,3 +76,36 @@ def test_healthz(client):
     """Health endpoint reports database connectivity."""
     r = client.get("/healthz")
     assert r.status_code == 200 and r.json() == {"ok": True, "db": True}
+
+
+def _user_id(client, email: str) -> str:
+    """Look up a user's id directly in the app's database."""
+    with client.app.state.runtime_holder.get().pool.connection() as c:
+        return str(c.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()["id"])
+
+
+def test_reports_quota_decreases_after_consume(client, settings):
+    """/reports shows the remaining hourly run quota, which drops after a run is consumed."""
+    from datetime import datetime, timezone
+
+    from statbrief.auth.limits import KIND_REPORT_RUN, consume, hour_ago
+
+    client.post("/signup", data={"email": "q@example.com", "password": "long-enough-pw"})
+    n = settings.runs_per_hour
+    assert f"{n} of {n} runs left this hour" in client.get("/reports").text
+    now = datetime.now(timezone.utc)
+    pool = client.app.state.runtime_holder.get().pool
+    consume(pool, _user_id(client, "q@example.com"), KIND_REPORT_RUN, n, hour_ago(now), now)
+    assert f"{n - 1} of {n} runs left this hour" in client.get("/reports").text
+
+
+def test_cookie_for_deleted_user_is_anonymous(client):
+    """A validly signed session for a user that no longer exists is treated as logged out."""
+    client.post("/signup", data={"email": "gone@example.com", "password": "long-enough-pw"})
+    assert client.get("/reports").status_code == 200
+    uid = _user_id(client, "gone@example.com")
+    with client.app.state.runtime_holder.get().pool.connection() as c:
+        c.execute("DELETE FROM users WHERE id = %s", (uid,))  # usage_events cascade
+    r = client.get("/reports")
+    assert r.status_code == 303 and r.headers["location"].startswith("/login")
+    assert client.get("/login").status_code == 200  # form shown, not a redirect loop

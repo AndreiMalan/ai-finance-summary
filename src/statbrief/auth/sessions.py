@@ -31,7 +31,12 @@ def _short_max_age_s(settings: Settings) -> int:
 
 
 def issue_session(response: Response, user_id: str, settings: Settings, remember: bool) -> None:
-    """Set the session cookie; persistent for SESSION_MAX_AGE_DAYS when `remember`."""
+    """Set the session cookie; persistent for SESSION_MAX_AGE_DAYS when `remember`.
+
+    The signed token carries the `r` (remember) flag. Without it the cookie is a browser-session
+    cookie (no Max-Age) and `read_session` additionally rejects the token server-side after
+    SESSION_SHORT_MAX_AGE_HOURS, whether or not the browser discards it.
+    """
     token = _serializer(settings).dumps({"uid": user_id, "r": bool(remember)})
     response.set_cookie(
         COOKIE_NAME, token,

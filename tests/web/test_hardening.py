@@ -182,3 +182,94 @@ def test_oversized_login_email_capped(client):
     with client.app.state.runtime_holder.get().pool.connection() as c:
         n = c.execute("SELECT max(length(email)) AS n FROM login_attempts").fetchone()["n"]
     assert n is not None and n <= MAX_EMAIL_LENGTH
+
+
+_DEMO_EMAIL, _DEMO_PW = "demo@example.com", "demo-password-123"
+_EMAIL_VARIANTS = [
+    _DEMO_EMAIL,
+    "  " + _DEMO_EMAIL,
+    " " * (MAX_EMAIL_LENGTH - 5) + _DEMO_EMAIL,
+    " " * 300 + _DEMO_EMAIL,
+    "DEMO@Example.COM ",
+    "\t" + _DEMO_EMAIL + "\n",
+]
+
+
+def test_login_throttle_shared_across_email_variants(client, settings):
+    """Padding, whitespace and case variants of one email share a single failure budget (AC 4)."""
+    for i in range(settings.login_max_failures):
+        variant = _EMAIL_VARIANTS[i % len(_EMAIL_VARIANTS)]
+        r = client.post("/login", data={"email": variant, "password": "wrong-wrong-1"})
+        assert r.status_code == 400
+    for variant in _EMAIL_VARIANTS:
+        r = client.post("/login", data={"email": variant, "password": "wrong-wrong-1"})
+        assert r.status_code == 429, repr(variant[-30:])
+    r = client.post("/login", data={"email": " " * 250 + _DEMO_EMAIL, "password": _DEMO_PW})
+    assert r.status_code == 429
+    r = client.post("/login", data={"email": _DEMO_EMAIL, "password": _DEMO_PW})
+    assert r.status_code == 429
+
+
+def test_login_echoes_normalised_email(client):
+    """The re-rendered form echoes the normalised (trimmed, lower-cased) email."""
+    r = client.post("/login", data={"email": "  Demo@Example.com  ", "password": "wrong-wrong-1"})
+    assert r.status_code == 400 and 'value="demo@example.com"' in r.text
+
+
+def test_healthz_503_when_setup_lock_times_out(settings, monkeypatch):
+    """A cold start that times out on the LangGraph setup lock yields 503, not 500."""
+    app = create_app(settings)
+
+    def timed_out():
+        """Simulate the setup-lock TimeoutError raised during bootstrap."""
+        raise TimeoutError("timed out waiting for the LangGraph setup advisory lock")
+
+    monkeypatch.setattr(app.state.runtime_holder, "get", timed_out)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.get("/healthz")
+    assert r.status_code == 503 and r.json() == {"ok": False, "db": False}
+
+
+def test_healthz_503_when_pool_open_times_out(settings, monkeypatch):
+    """PoolTimeout while opening the pool on a cold start yields 503."""
+    from psycopg_pool import PoolTimeout
+
+    app = create_app(settings)
+
+    def pool_timeout():
+        """Simulate the pool failing to open in time."""
+        raise PoolTimeout("pool initialization incomplete after 10.0 sec")
+
+    monkeypatch.setattr(app.state.runtime_holder, "get", pool_timeout)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        assert c.get("/healthz").status_code == 503
+
+
+def test_cold_start_with_unreachable_db_is_bounded_503(settings):
+    """With the database down, the first /healthz returns 503 within a bounded time."""
+    import time
+
+    down = settings.model_copy(update={"database_url": "postgresql://u:p@127.0.0.1:1/x",
+                                       "db_connect_timeout_s": 1.0, "db_pool_open_timeout_s": 1.0})
+    with TestClient(create_app(down), raise_server_exceptions=False) as c:
+        start = time.monotonic()
+        r = c.get("/healthz")
+        elapsed = time.monotonic() - start
+    assert r.status_code == 503 and elapsed < 10
+
+
+def test_too_long_demo_password_is_logged_not_fatal(settings):
+    """A DEMO_USER_PASSWORD above PASSWORD_MAX_LENGTH is a demo config error (D-022), not a 500."""
+    bad = settings.model_copy(update={"demo_user_password": SecretStr("p" * (settings.password_max_length + 1))})
+    with TestClient(create_app(bad), follow_redirects=False) as c:
+        assert c.get("/login").status_code == 200
+        assert c.get("/healthz").json().get("demo_user") == "misconfigured"
+
+
+def test_remember_me_label_uses_configured_days(settings):
+    """The "Remember me" label shows SESSION_MAX_AGE_DAYS on both GET and failed-POST renders."""
+    custom = settings.model_copy(update={"session_max_age_days": 7})
+    with TestClient(create_app(custom), follow_redirects=False) as c:
+        assert "Remember me for 7 days" in c.get("/login").text
+        r = c.post("/login", data={"email": "nobody@example.com", "password": "wrong-wrong-1"})
+        assert r.status_code == 400 and "Remember me for 7 days" in r.text

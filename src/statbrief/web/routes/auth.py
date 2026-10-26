@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from statbrief.auth.limits import login_allowed, record_login
 from statbrief.auth.sessions import clear_session, issue_session
 from statbrief.auth.users import (MAX_EMAIL_LENGTH, EmailTaken, InvalidEmail, WeakPassword, authenticate,
-                                  create_user)
+                                  create_user, normalize_email)
 from statbrief.web.deps import client_ip, get_runtime, optional_user, templates
 from statbrief.web.runtime import Runtime
 
@@ -33,6 +33,20 @@ def _safe_next(next_url: str | None) -> str:
     return _HOME
 
 
+def _login_key(raw_email: str) -> str:
+    """Canonical throttle key for a submitted email: normalised first, then capped.
+
+    Normalising before truncating means whitespace/case variants of one address (including
+    huge leading padding) all map to the same key, so they share one failure budget. Invalid
+    addresses fall back to the same trim + lower-case so they are throttled consistently too.
+    """
+    try:
+        key = normalize_email(raw_email)
+    except InvalidEmail:
+        key = raw_email.strip().lower()
+    return key[:MAX_EMAIL_LENGTH]
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_form(request: Request, next: str | None = None):
     """Render the login form (or skip it when already logged in)."""
@@ -40,7 +54,8 @@ def login_form(request: Request, next: str | None = None):
         return RedirectResponse(_safe_next(next), status_code=303)
     rt = get_runtime(request)
     return templates.TemplateResponse(request, "login.html",
-                                      {"next": next or "", "signups_enabled": rt.settings.signups_enabled})
+                                      {"next": next or "", "signups_enabled": rt.settings.signups_enabled,
+                                       "session_max_age_days": rt.settings.session_max_age_days})
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -49,10 +64,11 @@ def login(request: Request, rt: Annotated[Runtime, Depends(get_runtime)],
           remember: Annotated[str | None, Form()] = None, next: Annotated[str, Form()] = ""):
     """Authenticate with throttling; set the session cookie on success."""
     s, ip, now = rt.settings, client_ip(request), datetime.now(timezone.utc)
-    # Throttle key and stored/echoed value are capped so oversized input is never kept verbatim;
-    # authenticate() still sees the raw value and rejects anything over the limit.
-    email_key = email[:MAX_EMAIL_LENGTH]
-    ctx = {"next": next, "email": email_key, "signups_enabled": s.signups_enabled}
+    # One canonical key (normalised, then capped) is used for the throttle check, the recorded
+    # attempt and the form echo; authenticate() still sees the raw value and normalises it itself.
+    email_key = _login_key(email)
+    ctx = {"next": next, "email": email_key, "signups_enabled": s.signups_enabled,
+           "session_max_age_days": s.session_max_age_days}
     if not login_allowed(rt.pool, email_key, ip, now, s.login_max_failures, timedelta(minutes=s.login_window_minutes)):
         ctx["error"] = f"Too many failed attempts. Try again in {s.login_window_minutes} minutes."
         return templates.TemplateResponse(request, "login.html", ctx, status_code=429)

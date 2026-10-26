@@ -3,13 +3,9 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-
-from statbrief.web.deps import get_runtime
-from statbrief.web.runtime import Runtime
 
 router = APIRouter()
 
@@ -20,14 +16,16 @@ def sse_event(event: str, data: dict) -> str:
 
 
 @router.get("/_diag/sse")
-async def sse_diag(rt: Annotated[Runtime, Depends(get_runtime)]) -> StreamingResponse:
+async def sse_diag(request: Request) -> StreamingResponse:
     """Emit a few timed ticks so we can see whether events arrive incrementally.
 
-    Hidden (404) in prod unless ENABLE_DIAG_ENDPOINTS is true.
+    Hidden (404) in prod unless ENABLE_DIAG_ENDPOINTS is true. Settings are read from the
+    runtime holder without opening the database: the endpoint never needs it.
     """
-    if not rt.settings.diag_endpoints_enabled:
+    settings = request.app.state.runtime_holder.settings
+    if not settings.diag_endpoints_enabled:
         raise HTTPException(status_code=404)
-    ticks, interval = rt.settings.sse_diag_ticks, rt.settings.sse_diag_interval_s
+    ticks, interval = settings.sse_diag_ticks, settings.sse_diag_interval_s
 
     async def gen() -> AsyncIterator[str]:
         """Yield tick events then a done event."""

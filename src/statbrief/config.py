@@ -13,8 +13,10 @@ SSE_DIAG_MAX_TOTAL_S = 290.0
 class Settings(BaseSettings):
     """Every tunable of the app. Field names map to UPPER_CASE env vars."""
 
+    # hide_input_in_errors: a ValidationError must never echo SESSION_SECRET or a DB password.
     model_config = SettingsConfigDict(
-        env_file=".env", extra="ignore", case_sensitive=False, env_ignore_empty=True
+        env_file=".env", extra="ignore", case_sensitive=False, env_ignore_empty=True,
+        hide_input_in_errors=True,
     )
 
     app_env: Literal["dev", "test", "prod"] = "dev"
@@ -24,6 +26,8 @@ class Settings(BaseSettings):
     db_pool_min: int = Field(1, ge=0)
     db_pool_max: int = Field(5, ge=1)
     db_setup_lock_timeout_s: float = Field(60.0, gt=0)
+    db_connect_timeout_s: float = Field(5.0, gt=0)  # libpq connect_timeout (rounded up to whole s)
+    db_pool_open_timeout_s: float = Field(10.0, gt=0)  # max wait for the pool's first connections
     healthz_db_timeout_s: float = Field(3.0, gt=0)
 
     signups_enabled: bool = True
@@ -67,6 +71,13 @@ class Settings(BaseSettings):
         """Reject a password minimum length larger than the maximum length."""
         if self.password_min_length > self.password_max_length:
             raise ValueError("PASSWORD_MIN_LENGTH must not exceed PASSWORD_MAX_LENGTH")
+        return self
+
+    @model_validator(mode="after")
+    def _short_session_below_long_session(self) -> "Settings":
+        """Reject a non-remember session lifetime that is not shorter than the remember-me lifetime."""
+        if self.session_short_max_age_hours >= self.session_max_age_days * 24:
+            raise ValueError("SESSION_SHORT_MAX_AGE_HOURS must be below SESSION_MAX_AGE_DAYS * 24")
         return self
 
     @model_validator(mode="after")

@@ -4,12 +4,7 @@ from pydantic import ValidationError
 
 from statbrief.config import Settings
 
-
-@pytest.fixture(autouse=True)
-def _clean_settings_env(monkeypatch):
-    """Remove every Settings env var so the developer's shell can't leak into tests."""
-    for field in Settings.model_fields:
-        monkeypatch.delenv(field.upper(), raising=False)
+# The autouse env-clearing fixture now lives in tests/conftest.py so it covers every test.
 
 
 def test_defaults_match_spec():
@@ -144,3 +139,47 @@ def test_diag_endpoints_disabled_by_default():
     """ENABLE_DIAG_ENDPOINTS defaults to false and can be switched on."""
     assert _base().enable_diag_endpoints is False
     assert _base(enable_diag_endpoints=True).enable_diag_endpoints is True
+
+
+def test_validation_error_hides_secret_inputs():
+    """A rejected SESSION_SECRET (or other input) is never echoed in the ValidationError text."""
+    url = "postgresql://u:Sup3rS3cretDbPw@h/db"
+    with pytest.raises(ValidationError) as short_secret:
+        Settings(database_url=url, session_secret="tiny-s3cret", _env_file=None)
+    with pytest.raises(ValidationError) as model_level:  # model validators see every input
+        Settings(database_url=url, session_secret="s" * 32, db_pool_min=9, db_pool_max=1, _env_file=None)
+    for exc in (short_secret, model_level):
+        text = str(exc.value)
+        assert "tiny-s3cret" not in text and "Sup3rS3cretDbPw" not in text
+
+
+def test_db_timeouts_defaults_and_validation():
+    """DB_CONNECT_TIMEOUT_S defaults to 5, DB_POOL_OPEN_TIMEOUT_S to 10; both must be positive."""
+    s = _base()
+    assert s.db_connect_timeout_s == 5.0 and s.db_pool_open_timeout_s == 10.0
+    for field in ("db_connect_timeout_s", "db_pool_open_timeout_s"):
+        with pytest.raises(ValidationError):
+            _base(**{field: 0})
+
+
+def test_short_session_must_be_shorter_than_remember_session():
+    """SESSION_SHORT_MAX_AGE_HOURS must be below SESSION_MAX_AGE_DAYS * 24."""
+    assert _base(session_max_age_days=1, session_short_max_age_hours=23).session_short_max_age_hours == 23
+    for days, hours in ((1, 24), (30, 720), (2, 100)):
+        with pytest.raises(ValidationError, match="SESSION_SHORT_MAX_AGE_HOURS"):
+            _base(session_max_age_days=days, session_short_max_age_hours=hours)
+
+
+def test_get_settings_is_cached(monkeypatch):
+    """get_settings() reads the environment once and returns the same instance afterwards."""
+    from statbrief.config import get_settings
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+    monkeypatch.setenv("SESSION_SECRET", "s" * 32)
+    get_settings.cache_clear()
+    try:
+        first = get_settings()
+        monkeypatch.setenv("RUNS_PER_HOUR", "7")
+        assert get_settings() is first and first.runs_per_hour == 10
+    finally:
+        get_settings.cache_clear()

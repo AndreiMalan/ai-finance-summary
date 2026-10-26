@@ -80,8 +80,8 @@ def test_password_max_length(pool):
 
 def test_demo_user_upsert_updates_password(pool):
     """Re-running demo upsert with a new password replaces the old one."""
-    d1 = upsert_demo_user(pool, "demo@example.com", "first-password-1", min_length=MIN)
-    d2 = upsert_demo_user(pool, "demo@example.com", "second-password-2", min_length=MIN)
+    d1 = upsert_demo_user(pool, "demo@example.com", "first-password-1", min_length=MIN, max_length=MAX)
+    d2 = upsert_demo_user(pool, "demo@example.com", "second-password-2", min_length=MIN, max_length=MAX)
     assert d1.id == d2.id and d2.is_demo
     assert authenticate(pool, "demo@example.com", "first-password-1", max_length=MAX) is None
     assert authenticate(pool, "demo@example.com", "second-password-2", max_length=MAX) == d2
@@ -91,7 +91,7 @@ def test_demo_upsert_never_takes_over_regular_account(pool):
     """If the demo email belongs to a regular user, upsert refuses and leaves it intact."""
     u = create_user(pool, "taken@example.com", "regular-password", min_length=MIN, max_length=MAX)
     with pytest.raises(DemoEmailConflict):
-        upsert_demo_user(pool, "Taken@example.com", "demo-password-xyz", min_length=MIN)
+        upsert_demo_user(pool, "Taken@example.com", "demo-password-xyz", min_length=MIN, max_length=MAX)
     assert authenticate(pool, "taken@example.com", "regular-password", max_length=MAX) == u
     assert authenticate(pool, "taken@example.com", "demo-password-xyz", max_length=MAX) is None
     assert not get_user(pool, u.id).is_demo
@@ -100,7 +100,7 @@ def test_demo_upsert_never_takes_over_regular_account(pool):
 def test_demo_upsert_enforces_min_length(pool):
     """A too-short demo password is refused before touching the database."""
     with pytest.raises(WeakPassword):
-        upsert_demo_user(pool, "demo@example.com", "short", min_length=MIN)
+        upsert_demo_user(pool, "demo@example.com", "short", min_length=MIN, max_length=MAX)
     assert authenticate(pool, "demo@example.com", "short", max_length=MAX) is None
 
 
@@ -112,3 +112,11 @@ def test_get_user_with_malformed_id_returns_none(pool):
 def test_get_user_unknown_uuid_returns_none(pool):
     """A well-formed UUID with no matching row returns None."""
     assert get_user(pool, str(uuid.uuid4())) is None
+
+
+def test_demo_upsert_enforces_max_length(pool):
+    """A demo password above the maximum is refused like any other account's."""
+    with pytest.raises(WeakPassword, match="at most"):
+        upsert_demo_user(pool, "demo@example.com", "p" * (MAX + 1), min_length=MIN, max_length=MAX)
+    with pool.connection() as c:
+        assert c.execute("SELECT count(*) AS n FROM users").fetchone()["n"] == 0

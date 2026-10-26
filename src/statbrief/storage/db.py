@@ -1,7 +1,10 @@
 """Postgres connection pool, SQL migration runner and LangGraph table setup."""
 import logging
+import math
 import time
 from importlib import resources
+from types import MappingProxyType
+from typing import Any
 
 from psycopg import Connection
 from psycopg.rows import dict_row
@@ -19,24 +22,46 @@ _LANGGRAPH_SETUP_LOCK_KEY = 0x5B_0002  # pg advisory lock id serialising concurr
 _LANGGRAPH_SETUP_LOCK_POLL_SECONDS = 0.1
 # Every connection (pooled or direct): no implicit transactions, no server-side prepared
 # statements (unsupported by Neon's transaction-mode pooler), rows as dicts.
-CONN_KWARGS = {"autocommit": True, "prepare_threshold": None, "row_factory": dict_row}
+# Read-only and shared; per-call kwargs are built from a copy by `connection_kwargs`.
+CONN_KWARGS = MappingProxyType({"autocommit": True, "prepare_threshold": None, "row_factory": dict_row})
 
 
-def connect(url: str) -> Connection:
+def connection_kwargs(connect_timeout_s: float | None = None) -> dict[str, Any]:
+    """Return a fresh kwargs dict: CONN_KWARGS plus libpq `connect_timeout` when given.
+
+    libpq only accepts whole seconds, so the timeout is rounded up (and is at least 1).
+    """
+    kwargs = dict(CONN_KWARGS)
+    if connect_timeout_s is not None:
+        kwargs["connect_timeout"] = max(1, math.ceil(connect_timeout_s))
+    return kwargs
+
+
+def connect(url: str, connect_timeout_s: float | None = None) -> Connection:
     """Open a single direct psycopg connection with the app's standard settings."""
-    return Connection.connect(url, **CONN_KWARGS)
+    return Connection.connect(url, **connection_kwargs(connect_timeout_s))
 
 
 def create_pool(settings: Settings) -> ConnectionPool:
-    """Open a small psycopg pool on the (pooled) runtime URL, sized from settings."""
+    """Open a small psycopg pool on the (pooled) runtime URL, sized from settings.
+
+    Connections are health-checked on checkout (`check_connection`) so backends killed while
+    idle (e.g. Neon scale-to-zero) are replaced transparently. Opening waits at most
+    DB_POOL_OPEN_TIMEOUT_S and raises PoolTimeout otherwise; the failed pool is closed.
+    """
     pool = ConnectionPool(
         settings.database_url,
         min_size=settings.db_pool_min,
         max_size=settings.db_pool_max,
-        kwargs=CONN_KWARGS,
+        kwargs=connection_kwargs(settings.db_connect_timeout_s),
+        check=ConnectionPool.check_connection,
         open=False,
     )
-    pool.open(wait=True)
+    try:
+        pool.open(wait=True, timeout=settings.db_pool_open_timeout_s)
+    except BaseException:
+        pool.close()
+        raise
     return pool
 
 
@@ -44,9 +69,13 @@ def bootstrap(settings: Settings) -> None:
     """Run app migrations and LangGraph setup on one short-lived direct connection.
 
     Uses `settings.bootstrap_database_url` (Neon's unpooled URL when configured) because the
-    session-level advisory lock is unsafe through a transaction-mode pooler.
+    session-level advisory lock is unsafe through a transaction-mode pooler. In prod a missing
+    DATABASE_URL_UNPOOLED is therefore logged as a WARNING (the URL itself is never logged).
     """
-    with connect(settings.bootstrap_database_url) as conn:
+    if settings.app_env == "prod" and not settings.database_url_unpooled:
+        logger.warning("DATABASE_URL_UNPOOLED is not set in prod: bootstrap falls back to DATABASE_URL; "
+                       "the session-level setup lock is unsafe through a transaction-mode pooler")
+    with connect(settings.bootstrap_database_url, settings.db_connect_timeout_s) as conn:
         run_migrations(conn)
         setup_langgraph(conn, settings.db_setup_lock_timeout_s)
 

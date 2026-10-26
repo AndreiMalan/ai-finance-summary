@@ -54,10 +54,12 @@ def normalize_email(raw: str) -> str:
     return email
 
 
-def _check_min_length(password: str, min_length: int) -> None:
-    """Raise WeakPassword if `password` is shorter than `min_length`."""
+def _check_length(password: str, min_length: int, max_length: int) -> None:
+    """Raise WeakPassword if `password` is shorter than `min_length` or longer than `max_length`."""
     if len(password) < min_length:
         raise WeakPassword(f"Password must be at least {min_length} characters.")
+    if len(password) > max_length:
+        raise WeakPassword(f"Password must be at most {max_length} characters.")
 
 
 def create_user(
@@ -65,9 +67,7 @@ def create_user(
 ) -> User:
     """Create a regular user; raise InvalidEmail, WeakPassword or EmailTaken."""
     email = normalize_email(email)
-    _check_min_length(password, min_length)
-    if len(password) > max_length:
-        raise WeakPassword(f"Password must be at most {max_length} characters.")
+    _check_length(password, min_length, max_length)
     try:
         with pool.connection() as c:
             row = c.execute(
@@ -113,14 +113,17 @@ def authenticate(pool: ConnectionPool, email: str, password: str, max_length: in
     return _row_to_user(row) if verify_password(row["password_hash"], password) else None
 
 
-def upsert_demo_user(pool: ConnectionPool, email: str, password: str, min_length: int) -> User:
+def upsert_demo_user(
+    pool: ConnectionPool, email: str, password: str, min_length: int, max_length: int
+) -> User:
     """Create or update the demo account so its password always equals the env value.
 
-    Raises InvalidEmail, WeakPassword, or DemoEmailConflict when the email already
-    belongs to a regular account (which is never modified).
+    Raises InvalidEmail, WeakPassword (outside [min_length, max_length]), or
+    DemoEmailConflict when the email already belongs to a regular account (which is
+    never modified).
     """
     email = normalize_email(email)
-    _check_min_length(password, min_length)
+    _check_length(password, min_length, max_length)
     with pool.connection() as c:
         row = c.execute(
             "INSERT INTO users (email, password_hash, is_demo) VALUES (%s, %s, true) "
