@@ -30,8 +30,11 @@ CREATE TABLE IF NOT EXISTS uploads (
     filename     text NOT NULL,
     total_bytes  bigint NOT NULL,
     chunk_count  int NOT NULL,
-    created_at   timestamptz NOT NULL DEFAULT now()
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    CHECK (total_bytes > 0 AND chunk_count > 0)
 );
+-- for the cleanup job that expires abandoned uploads
+CREATE INDEX IF NOT EXISTS uploads_created_at ON uploads (created_at);
 CREATE TABLE IF NOT EXISTS upload_chunks (
     upload_id uuid NOT NULL REFERENCES uploads(id) ON DELETE CASCADE,
     idx       int NOT NULL,

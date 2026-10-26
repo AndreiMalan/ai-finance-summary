@@ -110,3 +110,15 @@ def test_get_blob_store_by_setting(settings, tmp_path):
     assert isinstance(get_blob_store(settings.model_copy(update={"local_blob_dir": str(tmp_path)})), LocalBlobStore)
     assert isinstance(get_blob_store(settings.model_copy(update={"blob_backend": "vercel"})), VercelBlobStore)
     assert settings.blob_backend == "local" and settings.local_blob_dir == ".local_blobs"
+
+
+def test_vercel_delete_absent_is_silent(monkeypatch):
+    """Deleting a missing blob is not an error (BlobStore contract)."""
+    from vercel.blob import BlobNotFoundError
+
+    def _missing(key, **kw):
+        """Simulate a 404 from the Blob API."""
+        raise BlobNotFoundError()
+
+    monkeypatch.setattr(blobs, "_vercel_sync", lambda: SimpleNamespace(delete_blob=_missing))
+    VercelBlobStore().delete("users/u/nope")

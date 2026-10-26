@@ -225,3 +225,87 @@ def test_observations_replace_is_atomic(ctx):
     with pytest.raises(Exception):
         repo.replace_for_file(a.id, ref.report_id, ref.file_id, dup)
     assert [o.obs_id for o in repo.list_for_report(a.id, ref.report_id)] == ["obs_1", "obs_2"]
+
+
+def test_upload_bounds_enforced(ctx):
+    """Non-positive sizes are refused (repo and DB CHECK); a chunk larger than the whole upload is refused."""
+    import psycopg
+
+    pool, a, b, rep = ctx
+    up = UploadRepo(pool)
+    for total, count in ((0, 1), (1, 0), (-5, 1)):
+        with pytest.raises(ValueError):
+            up.start(a.id, str(rep["id"]), "f.csv", total_bytes=total, chunk_count=count)
+    with pool.connection() as c, pytest.raises(psycopg.errors.CheckViolation):
+        c.execute("INSERT INTO uploads (user_id, report_id, filename, total_bytes, chunk_count) "
+                  "VALUES (%s, %s, 'f', 0, 1)", (a.id, rep["id"]))
+    uid = up.start(a.id, str(rep["id"]), "f.csv", total_bytes=3, chunk_count=2)
+    with pytest.raises(ValueError, match="larger"):
+        up.put_chunk(a.id, uid, 0, b"abcd")
+    up.put_chunk(a.id, uid, 0, b"abc")  # exactly total_bytes is fine
+
+
+def test_put_chunk_racing_delete_is_permission_error(ctx, settings):
+    """A chunk racing a concurrent upload delete is PermissionError, never a foreign-key error."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from statbrief.storage.db import connect
+
+    pool, a, b, rep = ctx
+    up = UploadRepo(pool)
+    uid = up.start(a.id, str(rep["id"]), "f.csv", total_bytes=2, chunk_count=1)
+    with connect(settings.database_url) as deleter, ThreadPoolExecutor(max_workers=1) as ex:
+        with deleter.transaction():
+            deleter.execute("DELETE FROM uploads WHERE id = %s", (uid,))  # row locked, not yet committed
+            started = threading.Event()
+
+            def _put():
+                """Send a chunk while the delete is in flight."""
+                started.set()
+                up.put_chunk(a.id, uid, 0, b"ab")
+
+            fut = ex.submit(_put)
+            started.wait()
+            with pytest.raises(TimeoutError):
+                fut.result(timeout=0.5)  # blocked on the upload row lock
+        with pytest.raises(PermissionError):
+            fut.result(timeout=10)
+    with pool.connection() as c:
+        assert c.execute("SELECT count(*) AS n FROM upload_chunks").fetchone()["n"] == 0
+
+
+def test_concurrent_replace_for_same_file_serialises(ctx):
+    """Two overlapping re-normalisations of one file both succeed; the later one wins entirely (no merge)."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    pool, a, b, rep = ctx
+    ref = _ref(a, rep)
+    FileRepo(pool).add(ref)
+    repo = ObservationRepo(pool)
+    set1 = _obs(ref, 3)
+    prov = set1[0].provenance
+    set2 = [Observation(obs_id=f"other_{i}", indicator_code="J", region_code="RO", region_level="country",
+                        period=f"2024-0{i}", frequency="M", value=float(i), unit="%", provenance=prov)
+            for i in range(1, 5)]
+    release, inside = threading.Event(), threading.Event()
+
+    class _Paused(list):
+        """Observation list whose iteration (i.e. the INSERT) waits until released, mid-transaction."""
+
+        def __iter__(self):
+            """Signal that the first replace is inside its transaction, then wait for the release."""
+            inside.set()
+            assert release.wait(10)
+            return super().__iter__()
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        first = ex.submit(repo.replace_for_file, a.id, ref.report_id, ref.file_id, _Paused(set1))
+        assert inside.wait(10)
+        second = ex.submit(repo.replace_for_file, a.id, ref.report_id, ref.file_id, set2)
+        with pytest.raises(TimeoutError):
+            second.result(timeout=0.5)  # waits on the file row lock held by the first replace
+        release.set()
+        assert (first.result(timeout=10), second.result(timeout=10)) == (3, 4)
+    assert sorted(o.obs_id for o in repo.list_for_report(a.id, ref.report_id)) == sorted(o.obs_id for o in set2)

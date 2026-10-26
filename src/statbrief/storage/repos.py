@@ -136,6 +136,8 @@ class UploadRepo:
 
     def start(self, user_id: str, report_id: str, filename: str, total_bytes: int, chunk_count: int) -> str:
         """Open an upload for the user's report (PermissionError for other users' reports)."""
+        if total_bytes <= 0 or chunk_count <= 0:
+            raise ValueError("total_bytes and chunk_count must be positive")
         with self.pool.connection() as c, c.transaction():
             if not _owns_report(c, user_id, report_id):
                 raise PermissionError("report not owned by user")
@@ -159,11 +161,23 @@ class UploadRepo:
         return up
 
     def put_chunk(self, user_id: str, upload_id: str, idx: int, data: bytes) -> None:
-        """Store one chunk (re-sending the same index replaces it); ValueError for an out-of-range index."""
-        up = self._owned(user_id, upload_id)
-        if not 0 <= idx < up["chunk_count"]:
-            raise ValueError("chunk index out of range")
-        with self.pool.connection() as c:
+        """Store one chunk (re-sending the same index replaces it).
+
+        Ownership check and insert share one transaction; the upload row is locked FOR SHARE so a concurrent
+        delete cannot turn the insert into a foreign-key error. PermissionError when the user does not own
+        the upload (or it is gone); ValueError for an out-of-range index or a chunk larger than the upload.
+        """
+        uid = _uuid(upload_id)
+        with self.pool.connection() as c, c.transaction():
+            up = None if uid is None else c.execute(
+                "SELECT id, chunk_count, total_bytes FROM uploads WHERE id = %s AND user_id = %s FOR SHARE",
+                (uid, user_id)).fetchone()
+            if up is None:
+                raise PermissionError("upload not owned by user")
+            if not 0 <= idx < up["chunk_count"]:
+                raise ValueError("chunk index out of range")
+            if len(data) > up["total_bytes"]:
+                raise ValueError("chunk is larger than the declared upload size")
             c.execute("INSERT INTO upload_chunks (upload_id, idx, data) VALUES (%s, %s, %s) "
                       "ON CONFLICT (upload_id, idx) DO UPDATE SET data = EXCLUDED.data", (up["id"], idx, data))
 
@@ -247,8 +261,10 @@ class ObservationRepo:
         PermissionError unless the user owns the file and the file belongs to `report_id`.
         """
         with self.pool.connection() as c, c.transaction():
-            owned = c.execute("SELECT 1 FROM files WHERE id = %s AND user_id = %s AND report_id = %s",
-                              (_uuid(file_id), user_id, _uuid(report_id))).fetchone()
+            # FOR UPDATE serialises concurrent re-normalisations of the same file: the second waits for the
+            # first to commit, then replaces its rows, instead of both writing and merging two result sets.
+            owned = c.execute("SELECT 1 FROM files WHERE id = %s AND user_id = %s AND report_id = %s "
+                              "FOR UPDATE", (_uuid(file_id), user_id, _uuid(report_id))).fetchone()
             if not owned:
                 raise PermissionError("file not owned by user or not in this report")
             c.execute("DELETE FROM observations WHERE file_id = %s AND user_id = %s", (file_id, user_id))

@@ -88,6 +88,13 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _prod_requires_vercel_blob(self) -> "Settings":
+        """Reject local-disk blob storage in prod: uploads must go to the private Vercel Blob store (D-021)."""
+        if self.app_env == "prod" and self.blob_backend != "vercel":
+            raise ValueError("BLOB_BACKEND must be 'vercel' in production")
+        return self
+
+    @model_validator(mode="after")
     def _sse_diag_within_max_duration(self) -> "Settings":
         """Reject SSE diagnostics streams that could outlive the serverless function."""
         if self.sse_diag_ticks * self.sse_diag_interval_s >= SSE_DIAG_MAX_TOTAL_S:

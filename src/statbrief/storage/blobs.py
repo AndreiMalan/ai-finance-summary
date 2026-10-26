@@ -119,8 +119,11 @@ class VercelBlobStore:
         return _vercel_sync().get_blob(key, access="private").body
 
     def delete(self, key: str) -> None:
-        """Delete a blob."""
-        _vercel_sync().delete_blob(key)
+        """Delete a blob (no error when absent: the SDK's BlobNotFoundError is a FileNotFoundError)."""
+        try:
+            _vercel_sync().delete_blob(key)
+        except FileNotFoundError:
+            pass
 
 
 def get_blob_store(settings: Settings) -> BlobStore:

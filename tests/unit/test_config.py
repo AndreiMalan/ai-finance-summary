@@ -39,7 +39,8 @@ def test_short_session_secret_rejected():
 def test_cookie_secure_only_in_prod():
     """Secure cookies are enforced in prod and relaxed for local http."""
     dev = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
-    prod = Settings(database_url="postgresql://x/y", session_secret="s" * 32, app_env="prod", _env_file=None)
+    prod = Settings(database_url="postgresql://x/y", session_secret="s" * 32, app_env="prod",
+                    blob_backend="vercel", _env_file=None)
     assert dev.cookie_secure is False
     assert prod.cookie_secure is True
 
@@ -193,3 +194,13 @@ def test_detection_settings_defaults_and_validation():
                 {"mapping_min_confidence": 1.5}, {"mapping_min_confidence": -0.1}):
         with pytest.raises(ValidationError):
             Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None, **bad)
+
+
+def test_prod_requires_vercel_blob_backend():
+    """Production must store uploads in the private Vercel Blob store; local disk is dev/test only."""
+    base = {"database_url": "postgresql://x/y", "session_secret": "s" * 32, "_env_file": None}
+    with pytest.raises(ValidationError, match="BLOB_BACKEND must be 'vercel' in production"):
+        Settings(app_env="prod", **base)
+    assert Settings(app_env="prod", blob_backend="vercel", **base).blob_backend == "vercel"
+    assert Settings(app_env="dev", **base).blob_backend == "local"
+    assert Settings(app_env="test", blob_backend="vercel", **base).blob_backend == "vercel"
