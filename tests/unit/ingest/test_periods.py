@@ -101,3 +101,13 @@ def test_malformed_iso_suffix_and_mixed_separators_invalid(raw):
     with pytest.raises(PeriodError) as exc:
         parse_period(raw, day_order="DMY")
     assert exc.value.code == "invalid_date"
+
+
+def test_fractional_serial_strings():
+    """ASCII decimal strings in the serial range are floored; other dotted strings parse as usual."""
+    assert parse_period("45352.5", excel_serial=True).period == "2024-03"
+    assert parse_period("2024.03", excel_serial=True).period == "2024-03"
+    for raw in ("99999.5", "45352.5"):
+        with pytest.raises(PeriodError) as exc:
+            parse_period(raw, excel_serial=raw == "99999.5")
+        assert exc.value.code == "invalid_date"

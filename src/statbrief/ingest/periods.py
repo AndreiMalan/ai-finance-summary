@@ -6,7 +6,8 @@ Ambiguous dd/mm vs mm/dd values are never guessed: they raise `ambiguous_date` u
 Accepted forms (years must lie in 1800-2200):
 - datetime/date → monthly; integral numbers 1800-2200 → annual; with `excel_serial=True`,
   numbers in the Excel serial range (1950-2099) → their date's month (a fractional part is the
-  time of day and is dropped; `looks_like_excel_serial` still counts whole numbers only).
+  time of day and is dropped, also for ASCII text such as "45352.5"; `looks_like_excel_serial`
+  still counts whole numbers only).
 - Annual "2024"; quarterly "2024-Q1", "2024Q1", "2024 Q1", "Q1 2024", "Q1-2024".
 - Monthly "2024M03", "2024-03", "2024/03", "2024.03", "03/2024", "03.2024", ISO "2024-03-15"
   (optionally with a time "T08:30" / " 08:30:00.5"),
@@ -39,6 +40,7 @@ _MONTH_NAMES = {
 _MONTH_LOOKUP = {name: num for num, names in _MONTH_NAMES.items() for name in names}
 
 _RE_YEAR = re.compile(r"^(\d{4})$")
+_RE_DECIMAL = re.compile(r"^\d+\.\d+$")  # fractional Excel serial written as text, e.g. "45352.5"
 _RE_Q1 = re.compile(r"^(\d{4})\s*[-/ ]?\s*q([1-4])$", re.I)
 _RE_Q2 = re.compile(r"^q([1-4])\s*[-/ ]?\s*(\d{4})$", re.I)
 _RE_EUROSTAT_M = re.compile(r"^(\d{4})m(\d{1,2})$", re.I)
@@ -120,6 +122,8 @@ def parse_period(value: Any, *, day_order: DayOrder | None = None, excel_serial:
     s = str(value).strip()
     if excel_serial and s.isascii() and s.isdigit():
         return parse_period(int(s), excel_serial=True)
+    if excel_serial and s.isascii() and _RE_DECIMAL.match(s) and _EXCEL_SERIAL_MIN <= float(s) < _EXCEL_SERIAL_MAX + 1:
+        return parse_period(float(s), excel_serial=True)  # serial with a time of day; "2024.03" falls through
     if m := _RE_YEAR.match(s):
         if not _YEAR_MIN <= int(m[1]) <= _YEAR_MAX:
             raise PeriodError("invalid_date", f"Year {m[1]} is out of range.")

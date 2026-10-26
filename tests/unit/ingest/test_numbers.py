@@ -84,3 +84,12 @@ def test_well_formed_thousands_groups_parse(raw, decimal, expected):
 def test_infer_decimal_ignores_thousands_lookalikes(values, expected):
     """Values with exactly three digits after one separator are not evidence for either separator."""
     assert infer_decimal(values) == expected
+
+
+@pytest.mark.parametrize("values,expected", [
+    (["1.234,5", "1.234"], ","), (["1,234.5", "1,234"], "."), (["1.234,5", "1,234.5"], None),
+    (["1.23,4", "1.2.3,4"], None),
+])
+def test_infer_decimal_uses_well_grouped_both_separator_values(values, expected):
+    """A well-grouped value with both separators is evidence for the one that occurs last."""
+    assert infer_decimal(values) == expected
