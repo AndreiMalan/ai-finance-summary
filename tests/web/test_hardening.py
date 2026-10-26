@@ -214,3 +214,45 @@ def test_login_echoes_normalised_email(client):
     """The re-rendered form echoes the normalised (trimmed, lower-cased) email."""
     r = client.post("/login", data={"email": "  Demo@Example.com  ", "password": "wrong-wrong-1"})
     assert r.status_code == 400 and 'value="demo@example.com"' in r.text
+
+
+def test_healthz_503_when_setup_lock_times_out(settings, monkeypatch):
+    """A cold start that times out on the LangGraph setup lock yields 503, not 500."""
+    app = create_app(settings)
+
+    def timed_out():
+        """Simulate the setup-lock TimeoutError raised during bootstrap."""
+        raise TimeoutError("timed out waiting for the LangGraph setup advisory lock")
+
+    monkeypatch.setattr(app.state.runtime_holder, "get", timed_out)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.get("/healthz")
+    assert r.status_code == 503 and r.json() == {"ok": False, "db": False}
+
+
+def test_healthz_503_when_pool_open_times_out(settings, monkeypatch):
+    """PoolTimeout while opening the pool on a cold start yields 503."""
+    from psycopg_pool import PoolTimeout
+
+    app = create_app(settings)
+
+    def pool_timeout():
+        """Simulate the pool failing to open in time."""
+        raise PoolTimeout("pool initialization incomplete after 10.0 sec")
+
+    monkeypatch.setattr(app.state.runtime_holder, "get", pool_timeout)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        assert c.get("/healthz").status_code == 503
+
+
+def test_cold_start_with_unreachable_db_is_bounded_503(settings):
+    """With the database down, the first /healthz returns 503 within a bounded time."""
+    import time
+
+    down = settings.model_copy(update={"database_url": "postgresql://u:p@127.0.0.1:1/x",
+                                       "db_connect_timeout_s": 1.0, "db_pool_open_timeout_s": 1.0})
+    with TestClient(create_app(down), raise_server_exceptions=False) as c:
+        start = time.monotonic()
+        r = c.get("/healthz")
+        elapsed = time.monotonic() - start
+    assert r.status_code == 503 and elapsed < 10

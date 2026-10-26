@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     db_pool_min: int = Field(1, ge=0)
     db_pool_max: int = Field(5, ge=1)
     db_setup_lock_timeout_s: float = Field(60.0, gt=0)
+    db_connect_timeout_s: float = Field(5.0, gt=0)  # libpq connect_timeout (rounded up to whole s)
+    db_pool_open_timeout_s: float = Field(10.0, gt=0)  # max wait for the pool's first connections
     healthz_db_timeout_s: float = Field(3.0, gt=0)
 
     signups_enabled: bool = True

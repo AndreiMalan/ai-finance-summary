@@ -151,3 +151,12 @@ def test_validation_error_hides_secret_inputs():
     for exc in (short_secret, model_level):
         text = str(exc.value)
         assert "tiny-s3cret" not in text and "Sup3rS3cretDbPw" not in text
+
+
+def test_db_timeouts_defaults_and_validation():
+    """DB_CONNECT_TIMEOUT_S defaults to 5, DB_POOL_OPEN_TIMEOUT_S to 10; both must be positive."""
+    s = _base()
+    assert s.db_connect_timeout_s == 5.0 and s.db_pool_open_timeout_s == 10.0
+    for field in ("db_connect_timeout_s", "db_pool_open_timeout_s"):
+        with pytest.raises(ValidationError):
+            _base(**{field: 0})
