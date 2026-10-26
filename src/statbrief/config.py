@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     api_max_response_mb: int = Field(20, ge=1)  # larger responses are refused (memory guard)
     worldbank_per_page: int = Field(1000, ge=1, le=20000)  # rows per World Bank page
     worldbank_max_pages: int = Field(20, ge=1)  # more pages than this → error (no unbounded pagination)
+    conflict_rel_tol: float = Field(0.005, ge=0.0, le=0.5)  # D-010: relative tolerance before rounding units
 
     cron_secret: SecretStr = SecretStr("")
 
