@@ -73,3 +73,31 @@ def test_explicit_order_never_overrides_unambiguous_value():
     """An unambiguous value parses the same whatever day order is set."""
     assert parse_period("25/03/2024", day_order="MDY").period == "2024-03"
     assert parse_period("03/25/2024", day_order="DMY").period == "2024-03"
+
+
+def test_fractional_excel_serial_is_floored_only_when_enabled():
+    """A serial with a time of day maps to its date's month; detection stays integer-only."""
+    assert parse_period(45352.75, excel_serial=True).period == "2024-03"
+    assert parse_period("45352", excel_serial=True).period == "2024-03"
+    with pytest.raises(PeriodError):
+        parse_period(45352.75)
+    with pytest.raises(PeriodError):
+        parse_period("٤٥٣٥٢", excel_serial=True)  # non-ASCII digits are not serials
+    assert looks_like_excel_serial([45352.5, 45353.5], min_share=0.5) is False
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("2024-03-15T00:00", "2024-03"), ("2024-03-15 13:45:10", "2024-03"), ("2024-03-15T08:30:00.123", "2024-03"),
+    ("Iun 2024", "2024-06"), ("Iul. 2024", "2024-07"), ("Noi 2024", "2024-11"), ("15-03-2024", "2024-03"),
+])
+def test_iso_times_and_ins_abbreviations(raw, expected):
+    """ISO date-times and Romanian INS month abbreviations parse."""
+    assert parse_period(raw).period == expected
+
+
+@pytest.mark.parametrize("raw", ["2024-03-15 garbage", "2024-03-15T", "01/02.2024", "25.03/2024"])
+def test_malformed_iso_suffix_and_mixed_separators_invalid(raw):
+    """Trailing junk after an ISO date and mixed d/m/y separators are invalid."""
+    with pytest.raises(PeriodError) as exc:
+        parse_period(raw, day_order="DMY")
+    assert exc.value.code == "invalid_date"

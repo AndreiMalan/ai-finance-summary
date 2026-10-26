@@ -2,8 +2,8 @@
 
 Lookup order: the code (case-insensitive, including short code aliases such as GR → EL and
 GB → UK), then the normalised name or alias: lower-case, diacritics removed (comma-below and
-legacy cedilla letters alike), hyphens as spaces, and a leading "judetul", "jud." or
-"municipiul" dropped. Data comes from the bundled `statbrief.ingest.data/regions.csv`.
+legacy cedilla letters alike), hyphens and en/em dashes as spaces, and a leading "judetul",
+"jud.", "municipiul" or "mun." dropped. Data comes from the bundled `statbrief.ingest.data/regions.csv`.
 Unknown values return None; nothing is guessed.
 """
 import csv
@@ -15,7 +15,8 @@ from typing import Any
 
 from statbrief.domain.observation import RegionLevel
 
-_PREFIXES = ("judetul ", "jud. ", "jud ", "municipiul ")
+_PREFIXES = ("judetul ", "jud. ", "jud ", "municipiul ", "mun. ", "mun ")
+_DASHES = str.maketrans({"\u2013": "-", "\u2014": "-"})  # en/em dashes are typed or auto-corrected for "-"
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,9 @@ class RegionMatch:
 
 
 def _key(s: str) -> str:
-    """Normalised lookup key: lower-case, no diacritics, no county prefixes, hyphens as spaces."""
+    """Normalised lookup key: lower-case, no diacritics, no county prefixes, hyphens/dashes as spaces."""
     s = "".join(c for c in unicodedata.normalize("NFKD", s.lower()) if not unicodedata.combining(c))
-    s = " ".join(s.replace("-", " ").split())
+    s = " ".join(s.translate(_DASHES).replace("-", " ").split())
     for p in _PREFIXES:
         if s.startswith(p):
             s = s[len(p):]

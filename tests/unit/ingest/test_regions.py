@@ -41,3 +41,12 @@ def test_regions_csv_loads_as_package_resource():
     text = resources.files("statbrief.ingest.data").joinpath("regions.csv").read_text(encoding="utf-8")
     levels = {line.split(",")[1] for line in text.splitlines()[1:] if line}
     assert levels <= set(get_args(RegionLevel))
+
+
+@pytest.mark.parametrize("raw,code", [("Caraș–Severin", "RO422"), ("Caraș—Severin", "RO422"),
+                                      ("Vîlcea", "RO415"), ("Dîmbovița", "RO313"), ("Mun. București", "RO321"),
+                                      ("Mun București", "RO321")])
+def test_resolve_dashes_old_orthography_and_mun_prefix(raw, code):
+    """En/em dashes, pre-1993 î spellings and the abbreviated "Mun." prefix resolve."""
+    m = resolve_region(raw)
+    assert m is not None and m.code == code

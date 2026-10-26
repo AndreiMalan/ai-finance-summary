@@ -8,6 +8,9 @@ Rules:
 - Decimal separator: the `decimal` argument when given; otherwise the last of "," / "." when both
   occur ("1.234,5" and "1,234.5" are both 1234.5), a single comma is a decimal comma ("7,4"),
   several commas are thousands ("1,234,567") and several dots are thousands ("1.234.567").
+- Thousands separators (the other of "," / ".") may appear only in the integer part, as a 1-3
+  digit head followed by 3-digit groups ("1.234.567"); "15.03.2024", "1,23.4" and a decimal
+  separator used twice raise NumberError instead of being read as some number.
 """
 import math
 import re
@@ -22,6 +25,11 @@ _DEC_DOT = re.compile(r"^-?\d+\.\d+$")
 # Plain decimal literal after separator handling; rejects Python-only forms float() accepts
 # ("1_000", "infinity", "nan") so only spreadsheet-style numbers pass.
 _PLAIN_NUMBER = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
+# Valid thousands grouping of an integer part, per thousands separator: 1-3 digit head, 3-digit groups.
+_GROUPED = {sep: re.compile(rf"^[+-]?\d{{1,3}}(?:{re.escape(sep)}\d{{3}})+$") for sep in ",."}
+# "1,234" / "1.234": one separator followed by exactly three digits reads as thousands or as a
+# decimal, so such values are no evidence for either separator in infer_decimal.
+_THOUSANDS_LOOKALIKE = re.compile(r"^[+-]?\d{1,3}[.,]\d{3}$")
 
 
 class NumberError(ValueError):
@@ -29,7 +37,12 @@ class NumberError(ValueError):
 
 
 def parse_number(value: Any, decimal: Literal[".", ","] | None = None) -> float | None:
-    """Return a float, None for a missing marker, or raise NumberError."""
+    """Return a float, None for a missing marker, or raise NumberError.
+
+    Without an explicit `decimal`, a lone "1,234" is read per cell as the decimal 1.234 (single
+    comma = decimal comma). Column-level callers must resolve that ambiguity themselves, via
+    `infer_decimal` or the user's mapping, and pass the result as `decimal`.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -55,6 +68,12 @@ def parse_number(value: Any, decimal: Literal[".", ","] | None = None) -> float 
             decimal = ","
         else:
             decimal = "."
+    thousands = "." if decimal == "," else ","
+    int_part, _, frac_part = s.partition(decimal)
+    if decimal in frac_part or thousands in frac_part:
+        raise NumberError(f"{value!r} is not a number")
+    if thousands in int_part and not _GROUPED[thousands].match(int_part):
+        raise NumberError(f"{value!r} has malformed thousands separators")
     s = s.replace(".", "").replace(",", ".") if decimal == "," else s.replace(",", "")
     if not _PLAIN_NUMBER.match(s):
         raise NumberError(f"{value!r} is not a number")
@@ -65,11 +84,16 @@ def parse_number(value: Any, decimal: Literal[".", ","] | None = None) -> float 
 
 
 def infer_decimal(values: Iterable[Any]) -> Literal[".", ","] | None:
-    """Dominant decimal separator among string cells, or None when undecided."""
+    """Dominant decimal separator among string cells, or None when undecided.
+
+    Thousands look-alikes such as "1,234" are skipped: they would support either separator.
+    """
     comma = dot = 0
     for v in values:
         if isinstance(v, str):
             s = _SPACES.sub("", v)
+            if _THOUSANDS_LOOKALIKE.match(s):
+                continue
             comma += bool(_DEC_COMMA.match(s))
             dot += bool(_DEC_DOT.match(s))
     if comma == dot:

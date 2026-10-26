@@ -5,13 +5,17 @@ Ambiguous dd/mm vs mm/dd values are never guessed: they raise `ambiguous_date` u
 
 Accepted forms (years must lie in 1800-2200):
 - datetime/date → monthly; integral numbers 1800-2200 → annual; with `excel_serial=True`,
-  integral numbers in the Excel serial range (1950-2099) → their date's month.
+  numbers in the Excel serial range (1950-2099) → their date's month (a fractional part is the
+  time of day and is dropped; `looks_like_excel_serial` still counts whole numbers only).
 - Annual "2024"; quarterly "2024-Q1", "2024Q1", "2024 Q1", "Q1 2024", "Q1-2024".
-- Monthly "2024M03", "2024-03", "2024/03", "2024.03", "03/2024", "03.2024", ISO "2024-03-15",
+- Monthly "2024M03", "2024-03", "2024/03", "2024.03", "03/2024", "03.2024", ISO "2024-03-15"
+  (optionally with a time "T08:30" / " 08:30:00.5"),
   month names in English or Romanian ("Mar 2024", "martie 2024", "Ian. 2024").
-- "dd/mm/yyyy": a part above 12 fixes the order; both parts <= 12 and unequal → `ambiguous_date`
-  unless `day_order` is given. Month 13, day 32 and similar → `invalid_date`.
+- "dd/mm/yyyy" (separator "/", "." or "-", the same one twice): a part above 12 fixes the
+  order; both parts <= 12 and unequal → `ambiguous_date` unless `day_order` is given.
+  Month 13, day 32 and similar → `invalid_date`.
 """
+import math
 import re
 import unicodedata
 from collections.abc import Iterable
@@ -28,9 +32,9 @@ _YEAR_MIN, _YEAR_MAX = 1800, 2200
 _MONTH_NAMES = {
     1: ("jan", "january", "ian", "ianuarie"), 2: ("feb", "february", "februarie"),
     3: ("mar", "march", "martie"), 4: ("apr", "april", "aprilie"), 5: ("may", "mai"),
-    6: ("jun", "june", "iunie"), 7: ("jul", "july", "iulie"), 8: ("aug", "august"),
+    6: ("jun", "june", "iun", "iunie"), 7: ("jul", "july", "iul", "iulie"), 8: ("aug", "august"),
     9: ("sep", "sept", "september", "septembrie"), 10: ("oct", "october", "octombrie"),
-    11: ("nov", "november", "noiembrie"), 12: ("dec", "december", "decembrie"),
+    11: ("nov", "november", "noi", "noiembrie"), 12: ("dec", "december", "decembrie"),
 }
 _MONTH_LOOKUP = {name: num for num, names in _MONTH_NAMES.items() for name in names}
 
@@ -40,8 +44,8 @@ _RE_Q2 = re.compile(r"^q([1-4])\s*[-/ ]?\s*(\d{4})$", re.I)
 _RE_EUROSTAT_M = re.compile(r"^(\d{4})m(\d{1,2})$", re.I)
 _RE_YM = re.compile(r"^(\d{4})[-/.](\d{1,2})$")
 _RE_MY = re.compile(r"^(\d{1,2})[-/.](\d{4})$")
-_RE_ISO = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[ T].*)?$")
-_RE_DMY = re.compile(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$")
+_RE_ISO = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?:[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$")  # optional time of day
+_RE_DMY = re.compile(r"^(\d{1,2})([/.-])(\d{1,2})\2(\d{4})$")  # both separators must be the same
 _RE_NAMED = re.compile(r"^([^\W\d_]+)\.?\s+(\d{4})$", re.U)
 
 
@@ -107,14 +111,14 @@ def parse_period(value: Any, *, day_order: DayOrder | None = None, excel_serial:
     if isinstance(value, bool) or value is None:
         raise PeriodError("invalid_date", "Empty or invalid date.")
     if isinstance(value, int | float):
-        if excel_serial and float(value).is_integer() and _EXCEL_SERIAL_MIN <= value <= _EXCEL_SERIAL_MAX:
-            d = _EXCEL_EPOCH + timedelta(days=int(value))
+        if excel_serial and _EXCEL_SERIAL_MIN <= value < _EXCEL_SERIAL_MAX + 1:
+            d = _EXCEL_EPOCH + timedelta(days=math.floor(value))  # a fraction is the time of day
             return _month(d.year, d.month)
         if float(value).is_integer() and _YEAR_MIN <= value <= _YEAR_MAX:
             return ParsedPeriod(f"{int(value):04d}", "A")
         raise PeriodError("invalid_date", f"{value!r} is not a year or date.")
     s = str(value).strip()
-    if excel_serial and s.isdigit():
+    if excel_serial and s.isascii() and s.isdigit():
         return parse_period(int(s), excel_serial=True)
     if m := _RE_YEAR.match(s):
         if not _YEAR_MIN <= int(m[1]) <= _YEAR_MAX:
@@ -135,7 +139,7 @@ def parse_period(value: Any, *, day_order: DayOrder | None = None, excel_serial:
             raise PeriodError("invalid_date", "This date does not exist.") from exc
         return _month(int(m[1]), int(m[2]))
     if m := _RE_DMY.match(s):
-        return _from_dmy(int(m[1]), int(m[2]), int(m[3]), day_order)
+        return _from_dmy(int(m[1]), int(m[3]), int(m[4]), day_order)
     if m := _RE_NAMED.match(s):
         month = _MONTH_LOOKUP.get(_strip_accents(m[1]))
         if month:
@@ -149,7 +153,7 @@ def infer_day_order(values: Iterable[Any]) -> DayOrder | None:
     for v in values:
         m = _RE_DMY.match(str(v).strip()) if v is not None else None
         if m:
-            a, b = int(m[1]), int(m[2])
+            a, b = int(m[1]), int(m[3])
             if a > 12 >= b:
                 seen.add("DMY")
             elif b > 12 >= a:
