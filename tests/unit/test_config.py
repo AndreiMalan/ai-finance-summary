@@ -183,3 +183,13 @@ def test_get_settings_is_cached(monkeypatch):
         assert get_settings() is first and first.runs_per_hour == 10
     finally:
         get_settings.cache_clear()
+
+
+def test_detection_settings_defaults_and_validation():
+    """Schema-detection tunables default to 200 / 20 / 0.8 and are range-checked."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert (s.detect_sample_rows, s.detect_header_scan_rows, s.mapping_min_confidence) == (200, 20, 0.8)
+    for bad in ({"detect_sample_rows": 9}, {"detect_header_scan_rows": 0},
+                {"mapping_min_confidence": 1.5}, {"mapping_min_confidence": -0.1}):
+        with pytest.raises(ValidationError):
+            Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None, **bad)
