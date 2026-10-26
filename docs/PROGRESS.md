@@ -7,14 +7,14 @@ This file is updated at **every** step transition (task dispatched, implemented,
 
 ```state
 milestone: M2
-task: 7
-task_title: Normalization with provenance (AC 16, 18, 19)
+task: 8
+task_title: Storage — tables, user-scoped repositories, blob stores
 phase: implementing
 branch: m2-ingestion
-base_commit: 45054fd
-last_verified_commit: 45054fd
+base_commit: 813e6e2
+last_verified_commit: 813e6e2
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: Task 1 implementer running; then review, then Tasks 2-9 in order (subagent-driven-development). After Task 9: deploy preview, set BLOB_BACKEND=vercel in Vercel (Production+Preview), live upload test, final review + QA + retro, merge.
+next_action: Task 8 implementer running (migration 002, repos, LocalBlobStore/VercelBlobStore). Then review; then Task 9 (upload API, must pass max_rows/max_scan_rows/max_columns + max_uncompressed_bytes Settings); then preview deploy + BLOB_BACKEND=vercel + live upload test; final review, QA, retro, merge.
 updated: 2026-10-26
 ```
 
@@ -69,6 +69,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2-T4 Cell parsers | e65e9e9..087602f | 10/10 (after 2 fix rounds) |
 | M2-T5 Schema detection | 018c355..8933e08 | 9/10 (after fix round from 7/10) |
 | M2-T6 Row parsing + validation | 85d0e8d..45054fd | 9/10 (after fix round from 7/10) |
+| M2-T7 Normalization | a51ffd2..813e6e2 | 10/10 (after 3 review cycles) |
 
 ## External setup status
 
