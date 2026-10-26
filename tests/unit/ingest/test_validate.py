@@ -184,3 +184,13 @@ def test_grouped_message_caps_value_list():
     t = _table([[f"2024-{i + 1:02d}", f"Nowhere{i}", "X", 1, "%", 1] for i in range(n)])
     [issue] = [i for i in validate_table(t, MAP, "f1").issues if i.code == "unknown_region"]
     assert "(+2 more)" in issue.message and f"'Nowhere{n - 1}'" not in issue.message
+
+
+def test_yyyymm_periods_parse_in_date_named_column_only():
+    """202403 is March 2024 under a date-named header ("luna"), but an invalid date under "cod"."""
+    ok = parse_rows(_table([[202403, "Cluj", "HICP", 7.4, "%", 1.0]]), MAP)[0]
+    assert ok.period is not None and ok.period.period == "2024-03" and ok.ok
+    cols = ["cod", "judet", "indicator", "valoare", "um", "val_adj_x"]
+    t = RawTable(columns=cols, rows=[[202403, "Cluj", "HICP", 7.4, "%", 1.0]], row_numbers=[4])
+    bad = parse_rows(t, MAP.model_copy(update={"date_col": "cod"}))[0]
+    assert [p.code for p in bad.problems] == ["invalid_date"]

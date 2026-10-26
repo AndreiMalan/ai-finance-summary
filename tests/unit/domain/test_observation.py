@@ -74,3 +74,14 @@ def test_period_trailing_newline_and_non_ascii_digits_rejected(period, freq):
     """Periods must be exactly the canonical ASCII form (no trailing newline, no non-ASCII digits)."""
     with pytest.raises(ValidationError):
         _obs(period=period, frequency=freq)
+
+
+def test_api_provenance_requires_timezone_aware_retrieved_at():
+    """A naive retrieved_at is ambiguous (local vs UTC) and is rejected; aware timestamps are kept."""
+    base = dict(api_name="eurostat", series_id="une_rt_m", query_url="https://ec.europa.eu/x")
+    with pytest.raises(ValidationError):
+        ApiProvenance(**base, retrieved_at=datetime(2026, 10, 26, 10))
+    with pytest.raises(ValidationError):
+        ApiProvenance(**base, retrieved_at="2026-10-26T10:00:00")
+    aware = ApiProvenance(**base, retrieved_at=datetime(2026, 10, 26, 10, tzinfo=timezone.utc))
+    assert aware.retrieved_at.tzinfo is not None

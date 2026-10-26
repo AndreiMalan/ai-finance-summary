@@ -3,7 +3,7 @@ from datetime import date, datetime
 
 import pytest
 
-from statbrief.ingest.periods import PeriodError, infer_day_order, looks_like_excel_serial, parse_period
+from statbrief.ingest.periods import ParsedPeriod, PeriodError, infer_day_order, looks_like_excel_serial, parse_period
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -111,3 +111,25 @@ def test_fractional_serial_strings():
         with pytest.raises(PeriodError) as exc:
             parse_period(raw, excel_serial=raw == "99999.5")
         assert exc.value.code == "invalid_date"
+
+
+@pytest.mark.parametrize("raw", [202403, "202403", 202403.0, " 202403 "])
+def test_yyyymm_integers_only_when_enabled(raw):
+    """yyyymm codes (202403) are months only when the caller enables them (date-named columns)."""
+    assert parse_period(raw, yyyymm=True) == ParsedPeriod("2024-03", "M")
+    with pytest.raises(PeriodError):
+        parse_period(raw)
+
+
+@pytest.mark.parametrize("raw", [202413, 202400, "180001x", 220101, 202403.5])
+def test_yyyymm_invalid_months_or_years_rejected(raw):
+    """Month 00/13, out-of-range years and fractional codes are invalid even with yyyymm enabled."""
+    with pytest.raises(PeriodError):
+        parse_period(raw, yyyymm=True)
+
+
+def test_yyyymm_does_not_change_other_forms():
+    """Years, Excel serials and ordinary strings parse exactly as before with yyyymm enabled."""
+    assert parse_period(2024, yyyymm=True) == ParsedPeriod("2024", "A")
+    assert parse_period("2024-Q1", yyyymm=True) == ParsedPeriod("2024-Q1", "Q")
+    assert parse_period(45352, yyyymm=True, excel_serial=True) == ParsedPeriod("2024-03", "M")

@@ -2,10 +2,9 @@
 import hashlib
 import math
 import re
-from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 Frequency = Literal["A", "Q", "M"]
 RegionLevel = Literal["country", "nuts1", "nuts2", "nuts3", "aggregate", "other"]
@@ -32,14 +31,14 @@ class UploadProvenance(BaseModel):
 
 
 class ApiProvenance(BaseModel):
-    """Where an observation came from in a public statistics API."""
+    """Where an observation came from in a public statistics API (`retrieved_at` must carry a timezone)."""
 
     model_config = ConfigDict(frozen=True)
     source_type: Literal["api"] = "api"
     api_name: Literal["eurostat", "worldbank"]
     series_id: str
     query_url: str
-    retrieved_at: datetime
+    retrieved_at: AwareDatetime
 
 
 Provenance = Annotated[UploadProvenance | ApiProvenance, Field(discriminator="source_type")]
