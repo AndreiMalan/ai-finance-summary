@@ -80,6 +80,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | Neon Postgres (fra1) with DATABASE_URL / DATABASE_URL_UNPOOLED | ✅ |
 | Vercel env: SESSION_SECRET, APP_ENV, DEMO_USER_EMAIL, DEMO_USER_PASSWORD | ✅ (Production; SESSION_SECRET also Preview) |
 | Vercel Blob store (private, OIDC: BLOB_STORE_ID) | ✅ Production + Preview |
+| BLOB_BACKEND=vercel (Production + Preview) | ✅ set 2026-10-26 (required by prod guard from M2-T8) |
 | Production deploy | ✅ https://ai-finance-summary.vercel.app (M1) |
 | DEMO_USER_PASSWORD ≥ 10 chars | ⬜ user to fix in Vercel |
 | OpenAI API key | ⬜ needed at M6 |
