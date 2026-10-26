@@ -1,9 +1,12 @@
 """Turn validated rows into Observations with upload provenance; every exclusion is listed with reasons.
 
 The report must belong to this file and table (same file_id and row count) or ValueError is raised.
-Normalization refuses to run (UnresolvedIssues) while the report is blocking (an error neither excluded
-nor fixed) or while re-validating the table still finds an error that the report does not resolve as
-"excluded": "fixed" only counts once re-validation no longer finds the error. A row is excluded — never silently dropped — when any of these holds, and each applicable reason is listed
+The table is always validated afresh; the passed report only contributes its resolutions, copied onto
+the fresh issues by issue_id (fresh issues it lacks stay "pending"). Issue rows therefore always come
+from the fresh validation, never from the report's possibly stale row lists. Normalization refuses to
+run (UnresolvedIssues) while any fresh error is not resolved "excluded": "fixed" never clears an error
+that fresh validation still finds, and an error the corrected table no longer has does not block.
+A row is excluded — never silently dropped — when any of these holds, and each applicable reason is listed
 once (deduplicated by issue/problem code):
 - it is a later occurrence named in the `duplicate_row` issue: only the first occurrence is kept,
   whatever the issue's resolution — "accepting" the duplicate_row warning still keeps only the first;
@@ -12,8 +15,9 @@ once (deduplicated by issue/problem code):
 """
 from dataclasses import dataclass, field
 
-# Shared with ValidationReport.blocking so the two definitions cannot drift.
-from statbrief.domain.dataset import ERROR_CLEARING_RESOLUTIONS, ColumnMapping, DatasetRef, ValidationReport
+# ERROR_CLEARING_RESOLUTIONS ({"excluded", "fixed"}) is not used here: against fresh issues only "excluded"
+# clears an error, because "fixed" on an error that re-validation still finds is untrue.
+from statbrief.domain.dataset import ColumnMapping, DatasetRef, ValidationIssue, ValidationReport
 from statbrief.domain.observation import Observation, UploadProvenance, make_obs_id
 from statbrief.ingest.readers import RawTable
 from statbrief.ingest.rows import ParsedRow, parse_rows
@@ -49,17 +53,15 @@ class NormalizationResult:
     excluded: list[ExcludedRow] = field(default_factory=list)
 
 
-def _blocking_ids(report: ValidationReport) -> list[str]:
-    """Ids of errors whose resolution does not clear them (same rule as `report.blocking`)."""
-    return [i.issue_id for i in report.issues if i.severity == "error" and i.resolution not in ERROR_CLEARING_RESOLUTIONS]
+def _effective_issues(fresh: ValidationReport, report: ValidationReport) -> list[ValidationIssue]:
+    """Fresh issues carrying the passed report's resolution by issue_id (absent from the report → "pending")."""
+    resolutions = {i.issue_id: i.resolution for i in report.issues}
+    return [i.model_copy(update={"resolution": resolutions.get(i.issue_id, "pending")}) for i in fresh.issues]
 
 
-def _revalidated_ids(table: RawTable, mapping: ColumnMapping, ref: DatasetRef,
-                     report: ValidationReport) -> list[str]:
-    """Ids of errors that re-validation still finds and that the passed report does not resolve as excluded."""
-    excluded = {i.issue_id for i in report.issues if i.resolution == _EXCLUDED}
-    fresh = validate_table(table, mapping, ref.file_id)
-    return [i.issue_id for i in fresh.issues if i.severity == "error" and i.issue_id not in excluded]
+def _blocking_ids(issues: list[ValidationIssue]) -> list[str]:
+    """Ids of fresh errors not resolved "excluded" (fresh validation still finds them, so "fixed" is untrue)."""
+    return [i.issue_id for i in issues if i.severity == "error" and i.resolution != _EXCLUDED]
 
 
 def _check_report_matches(table: RawTable, ref: DatasetRef, report: ValidationReport) -> None:
@@ -70,10 +72,10 @@ def _check_report_matches(table: RawTable, ref: DatasetRef, report: ValidationRe
         raise ValueError(f"report covers {report.row_count} rows, table has {len(table.rows)}")
 
 
-def _issue_reasons(report: ValidationReport) -> dict[int, dict[str, str]]:
+def _issue_reasons(issues: list[ValidationIssue]) -> dict[int, dict[str, str]]:
     """Row number → {code: reason} from issues whose rows must be excluded (first reason per code kept)."""
     reasons: dict[int, dict[str, str]] = {}
-    for issue in report.issues:
+    for issue in issues:
         if issue.code in _ALWAYS_EXCLUDED_CODES or issue.resolution == _EXCLUDED:
             for rn in issue.rows:
                 reasons.setdefault(rn, {}).setdefault(issue.code, f"{issue.code}: {issue.message}")
@@ -109,17 +111,19 @@ def to_observations(table: RawTable, mapping: ColumnMapping, ref: DatasetRef,
                     report: ValidationReport) -> NormalizationResult:
     """Normalize a table whose errors have all been resolved; every excluded row is listed with reasons.
 
-    Raises ValueError when the report does not match `ref`/`table`, and UnresolvedIssues with the
-    blocking ids of the report followed by errors re-validation still finds (de-duplicated, stable order).
-    Exclusions come from the passed report's resolutions.
+    Raises ValueError when the report does not match `ref`/`table`, and UnresolvedIssues with the ids of
+    fresh errors not resolved "excluded" (in fresh validation order). The table is parsed once; the parsed
+    rows feed both the fresh validation and the observations.
     """
     _check_report_matches(table, ref, report)
-    blocking = list(dict.fromkeys(_blocking_ids(report) + _revalidated_ids(table, mapping, ref, report)))
+    rows = parse_rows(table, mapping)
+    issues = _effective_issues(validate_table(table, mapping, ref.file_id, rows=rows), report)
+    blocking = _blocking_ids(issues)
     if blocking:
         raise UnresolvedIssues(blocking)
-    issue_reasons = _issue_reasons(report)
+    issue_reasons = _issue_reasons(issues)
     result = NormalizationResult()
-    for row in parse_rows(table, mapping):
+    for row in rows:
         reasons = _row_reasons(row, issue_reasons.get(row.row_number, {}))
         if reasons:
             result.excluded.append(ExcludedRow(row.row_number, reasons))

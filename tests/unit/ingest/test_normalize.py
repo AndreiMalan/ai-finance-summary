@@ -116,13 +116,35 @@ def test_fixed_error_on_unchanged_data_refused(rows, issue_id):
     assert exc.value.issue_ids == [issue_id]
 
 
-def test_blocking_and_revalidated_ids_merged_without_duplicates():
-    """Pending ids from the report and re-validation are merged once, in a stable order."""
+def test_unresolved_ids_listed_once_in_fresh_validation_order():
+    """Unresolved ids come from fresh validation (with the report's resolutions), each once, in its order."""
     t = _t([["2024-13", "Cluj", "HICP", "1", "%"], ["2024-02", "Atlantis", "HICP", "2", "%"]])
     report = validate_table(t, MAP, "f1").with_resolution("invalid_date:luna", "fixed")
     with pytest.raises(UnresolvedIssues) as exc:
         to_observations(t, MAP, REF, report)
-    assert exc.value.issue_ids == ["unknown_region:judet", "invalid_date:luna"]
+    assert exc.value.issue_ids == ["invalid_date:luna", "unknown_region:judet"]
+
+
+def test_error_gone_from_fresh_validation_no_longer_blocks():
+    """A pending error the corrected table no longer has does not block."""
+    old = _t([["2024-13", "Cluj", "HICP", "1", "%"]])
+    new = _t([["2024-01", "Cluj", "HICP", "1", "%"]])
+    res = to_observations(new, MAP, REF, validate_table(old, MAP, "f1"))
+    assert [o.provenance.row_number for o in res.observations] == [4]
+
+
+def test_exclusion_rows_taken_from_fresh_validation():
+    """An excluded issue applies to the rows fresh validation finds, not the report's stale row list."""
+    old = _t([["2024-01", "Cluj", "HICP", "1", "%"], ["2024-01", "Cluj", "HICP", "2", "%"],
+              ["2024-02", "Cluj", "HICP", "3", "%"], ["2024-03", "Cluj", "HICP", "4", "%"]])
+    new = _t([["2024-01", "Cluj", "HICP", "1", "%"], ["2024-02", "Cluj", "HICP", "2", "%"],
+              ["2024-03", "Cluj", "HICP", "3", "%"], ["2024-03", "Cluj", "HICP", "4", "%"]])
+    report = validate_table(old, MAP, "f1").with_resolution("duplicate_key_conflict:-", "excluded")
+    assert report.issues[0].rows == [4, 5]
+    res = to_observations(new, MAP, REF, report)
+    assert [o.provenance.row_number for o in res.observations] == [4, 5]
+    assert [(e.row_number, _codes(e)) for e in res.excluded] == \
+        [(6, ["duplicate_key_conflict"]), (7, ["duplicate_key_conflict"])]
 
 
 @pytest.mark.parametrize("update", [{"file_id": "other"}, {"row_count": 99}])

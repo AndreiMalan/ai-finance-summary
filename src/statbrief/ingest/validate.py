@@ -142,9 +142,14 @@ def _mixed_decimal_issue(table: RawTable, mapping: ColumnMapping, col: _Collecto
 
 
 def validate_table(table: RawTable, mapping: ColumnMapping, file_id: str,
-                   known_columns: frozenset[str] = frozenset()) -> ValidationReport:
-    """All issues for a table under a mapping; rows are referenced by original row number."""
-    rows = parse_rows(table, mapping)
+                   known_columns: frozenset[str] = frozenset(),
+                   rows: list[ParsedRow] | None = None) -> ValidationReport:
+    """All issues for a table under a mapping; rows are referenced by original row number.
+
+    `rows` lets a caller that already ran `parse_rows(table, mapping)` share that result instead of
+    parsing twice; it must come from this exact table and mapping.
+    """
+    rows = parse_rows(table, mapping) if rows is None else rows
     col = _Collector()
     _row_issues(rows, col)
     _mixed_decimal_issue(table, mapping, col)
