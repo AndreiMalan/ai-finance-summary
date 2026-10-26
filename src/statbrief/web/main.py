@@ -72,4 +72,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(pages.router)
     app.include_router(diag.router)
     app.include_router(uploads.router)
+    uploads.install_error_handlers(app)
     return app

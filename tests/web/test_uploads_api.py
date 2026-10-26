@@ -1,8 +1,12 @@
 """End-to-end tests of the chunked upload and ingestion API."""
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
+from statbrief.storage.repos import ObservationRepo
 from statbrief.web.main import create_app
+from statbrief.web.routes import uploads as uploads_mod
 from tests.fixtures import XLM_MACRO_XLS, csv_bytes, xlsx_bytes
 
 H = {"X-StatBrief-Client": "1"}
@@ -143,26 +147,24 @@ def test_size_mismatch_on_complete(client):
 
 
 def test_file_limit_per_report(settings, tmp_path):
-    """MAX_FILES_PER_REPORT is enforced when starting and when completing an upload (409)."""
-    with _make_client(settings, tmp_path, max_files_per_report=1) as c:
+    """MAX_FILES_PER_REPORT counts stored files plus still-open uploads when an upload starts (409)."""
+    with _make_client(settings, tmp_path, max_files_per_report=2) as c:
         c.post("/signup", data={"email": "l@example.com", "password": _PW})
         rid = _report(c)
         data = csv_bytes(_CANONICAL)
-        pending = _start(c, rid, "b.csv", len(data)).json()  # opened while the report is still empty
         assert _upload(c, rid, "a.csv", data).status_code == 201
-        assert _start(c, rid, "c.csv", len(data)).status_code == 409
-        for i in range(pending["chunk_count"]):
-            size = pending["chunk_bytes"]
-            c.put(f"/api/uploads/{pending['upload_id']}/chunks/{i}", content=data[i * size:(i + 1) * size],
-                  headers=H)
-        assert c.post(f"/api/uploads/{pending['upload_id']}/complete", headers=H).status_code == 409
+        assert _start(c, rid, "b.csv", len(data)).status_code == 201  # staged, not yet completed
+        assert _start(c, rid, "c.csv", len(data)).status_code == 409  # 1 file + 1 open upload
 
 
-def test_too_many_columns_rejected_at_preview(settings, tmp_path):
-    """A CSV wider than MAX_COLUMNS_PER_FILE is refused with 422 when read."""
+def test_too_many_columns_rejected(settings, tmp_path):
+    """Files wider than MAX_COLUMNS_PER_FILE get 422 too_large: CSV at completion, xlsx when read."""
     with _make_client(settings, tmp_path, max_columns_per_file=3) as c:
         c.post("/signup", data={"email": "w@example.com", "password": _PW})
-        fid = _file(c)  # 5 columns
+        rid = _report(c)
+        r = _upload(c, rid, "d.csv", csv_bytes(_CANONICAL))  # 5 columns
+        assert r.status_code == 422 and r.json()["code"] == "too_large"
+        fid = _upload(c, rid, "d.xlsx", xlsx_bytes({"S": _CANONICAL})).json()["file_id"]
         r = c.get(f"/api/files/{fid}/preview")
         assert r.status_code == 422 and r.json()["code"] == "too_large"
         assert c.put(f"/api/files/{fid}/mapping", json=_CANON_MAP, headers=H).status_code == 422
@@ -204,12 +206,14 @@ def test_validate_and_normalize_require_previous_steps(client):
 
 
 def test_stale_validation_report_requires_revalidation(client):
-    """When the mapping changes the table after validation, normalize answers 409 re-validate first."""
-    rows = [_CANONICAL[0], *_CANONICAL]  # header repeated: header_row 1 and 2 give the same columns
-    fid = _file(client, rows)
-    client.put(f"/api/files/{fid}/mapping", json={**_CANON_MAP, "header_row": 2}, headers=H)
+    """A stored report that no longer matches the table (StaleReport) makes normalize answer 409."""
+    fid = _file(client)
+    client.put(f"/api/files/{fid}/mapping", json=_CANON_MAP, headers=H)
     assert client.post(f"/api/files/{fid}/validate", headers=H).status_code == 200
-    client.put(f"/api/files/{fid}/mapping", json=_CANON_MAP, headers=H)  # now one more data row
+    rt = client.app.state.runtime_holder.get()
+    with rt.pool.connection() as c:  # simulate a report produced for another table shape
+        c.execute("UPDATE validation_reports SET report = jsonb_set(report, '{row_count}', '99') "
+                  "WHERE file_id = %s", (fid,))
     r = client.post(f"/api/files/{fid}/normalize", headers=H)
     assert r.status_code == 409 and r.json() == {"detail": "re-validate first"}
 
@@ -275,3 +279,146 @@ def test_api_requires_login(settings, tmp_path):
         r = anon.get("/api/template.csv")
         assert r.status_code == 401 and r.json() == {"detail": "login required"}
         assert anon.post("/api/reports", json={"title": "x"}, headers=H).status_code == 401
+
+
+def _limited(settings, tmp_path, **overrides):
+    """Client with MAX_FILES_PER_REPORT=1 (plus overrides); callers sign up their own user."""
+    return _make_client(settings, tmp_path, max_files_per_report=1, **overrides)
+
+
+def test_unreadable_json_refused_at_complete_and_frees_slot(settings, tmp_path):
+    """Sniffed-but-unreadable JSON (not a table) is refused at completion and does not use the file slot."""
+    with _limited(settings, tmp_path) as c:
+        c.post("/signup", data={"email": "j@example.com", "password": _PW})
+        rid = _report(c)
+        bad = _upload(c, rid, "x.json", b'{"a": 1}')
+        assert bad.status_code == 422 and bad.json()["code"] == "malformed"
+        assert _upload(c, rid, "d.csv", csv_bytes(_CANONICAL)).status_code == 201
+
+
+def test_delete_file_frees_slot_and_blob(settings, tmp_path):
+    """An xlsx stored but unreadable under the limits can be deleted (blob too); foreign ids are 404."""
+    with _limited(settings, tmp_path, max_columns_per_file=3) as c:
+        c.post("/signup", data={"email": "x@example.com", "password": _PW})
+        rid = _report(c)
+        done = _upload(c, rid, "wide.xlsx", xlsx_bytes({"S": _CANONICAL}))
+        assert done.status_code == 201  # xlsx sheets are only read at preview
+        fid = done.json()["file_id"]
+        assert c.get(f"/api/files/{fid}/preview").status_code == 422
+        assert _start(c, rid, "d.csv", 10).status_code == 409
+        assert c.delete(f"/api/files/{fid}").status_code == 403  # no client header
+        with _make_client(settings, tmp_path) as other:
+            other.post("/signup", data={"email": "o2@example.com", "password": _PW})
+            assert other.delete(f"/api/files/{fid}", headers=H).status_code == 404
+        assert c.delete(f"/api/files/{fid}", headers=H).status_code == 204
+        assert not [p for p in tmp_path.rglob("*") if p.is_file()]  # blob removed
+        assert c.get(f"/api/files/{fid}/preview").status_code == 404
+        assert c.delete(f"/api/files/{fid}", headers=H).status_code == 404
+        assert _upload(c, rid, "d.csv", csv_bytes([r[:3] for r in _CANONICAL])).status_code == 201
+
+
+def _json_file(client, records):
+    """Upload `records` as a JSON file; return the completion response."""
+    return _upload(client, _report(client), "d.json", json.dumps(records).encode())
+
+
+def test_nul_characters_never_cause_500(client):
+    """NULs in JSON values and keys are removed; the flow works and the preview asks for review."""
+    recs = [{"date": "2024-01", "region": "RO", "ind\u0000icator": "HI\u0000CP", "value": 1.5, "unit": "%"},
+            {"date": "2024-02", "region": "RO", "ind\u0000icator": "HICP", "value": 1.6, "unit": "%"}]
+    done = _json_file(client, recs)
+    assert done.status_code == 201, done.text
+    fid = done.json()["file_id"]
+    prev = client.get(f"/api/files/{fid}/preview").json()
+    assert prev["columns"][2] == "indicator" and prev["rows"][0][2] == "HICP" and prev["needs_review"] is True
+    assert client.put(f"/api/files/{fid}/mapping", json=_CANON_MAP, headers=H).status_code == 200
+    assert client.post(f"/api/files/{fid}/validate", headers=H).status_code == 200
+    assert client.post(f"/api/files/{fid}/normalize", headers=H).json()["observations"] == 2
+
+
+@pytest.mark.parametrize("recs", [[{"date": "\ud800", "value": 1}], [{"\udfff": "2024", "value": 1}]])
+def test_lone_surrogates_refused_at_complete(client, recs):
+    """Strings that are not valid Unicode are refused with 422 malformed at completion, never a 500."""
+    done = _json_file(client, recs)
+    assert done.status_code == 422 and done.json()["code"] == "malformed"
+
+
+def test_only_stale_report_becomes_409(client, monkeypatch):
+    """Other ValueErrors from normalization are real bugs: they are not masked as 409."""
+    fid = _file(client)
+    client.put(f"/api/files/{fid}/mapping", json=_CANON_MAP, headers=H)
+    client.post(f"/api/files/{fid}/validate", headers=H)
+
+    def boom(*_a, **_k):
+        """Simulate an unexpected bug inside normalization."""
+        raise ValueError("unexpected")
+
+    monkeypatch.setattr(uploads_mod, "to_observations", boom)
+    with pytest.raises(ValueError, match="unexpected"):
+        client.post(f"/api/files/{fid}/normalize", headers=H)
+
+
+def test_completing_twice_stores_one_file(client):
+    """A second completion of the same upload is 404 and stores nothing more."""
+    rid = _report(client)
+    data = csv_bytes(_CANONICAL)
+    up = _start(client, rid, "d.csv", len(data)).json()
+    size = up["chunk_bytes"]
+    for i in range(up["chunk_count"]):
+        client.put(f"/api/uploads/{up['upload_id']}/chunks/{i}", content=data[i * size:(i + 1) * size], headers=H)
+    assert client.post(f"/api/uploads/{up['upload_id']}/complete", headers=H).status_code == 201
+    assert client.post(f"/api/uploads/{up['upload_id']}/complete", headers=H).status_code == 404
+
+
+def _file_owner(client, fid):
+    """(user_id, report_id) of a stored file, read straight from the database."""
+    rt = client.app.state.runtime_holder.get()
+    with rt.pool.connection() as c:
+        row = c.execute("SELECT user_id, report_id FROM files WHERE id = %s", (fid,)).fetchone()
+    return rt, str(row["user_id"]), str(row["report_id"])
+
+
+def test_remap_invalidates_validation_and_observations(client):
+    """After a new mapping, normalize needs a fresh validation and old observations are gone."""
+    rows = [*_CANONICAL, ["2024-13", "RO113", "HICP", "7.0", "%"]]
+    fid = _file(client, rows)
+    client.put(f"/api/files/{fid}/mapping", json=_CANON_MAP, headers=H)
+    client.post(f"/api/files/{fid}/validate", headers=H)
+    client.post(f"/api/files/{fid}/issues/invalid_date:date", json={"resolution": "excluded"}, headers=H)
+    assert client.post(f"/api/files/{fid}/normalize", headers=H).json()["observations"] == 2
+    rt, user_id, report_id = _file_owner(client, fid)
+    assert len(ObservationRepo(rt.pool).list_for_report(user_id, report_id)) == 2
+    assert client.put(f"/api/files/{fid}/mapping", json={**_CANON_MAP, "decimal": "."},
+                      headers=H).status_code == 200
+    r = client.post(f"/api/files/{fid}/normalize", headers=H)
+    assert r.status_code == 409 and r.json() == {"detail": "validate first"}
+    assert ObservationRepo(rt.pool).list_for_report(user_id, report_id) == []
+
+
+def test_missing_blob_is_410_and_storage_errors_503(client, tmp_path, monkeypatch):
+    """A stored file whose blob vanished answers 410 file_gone; other storage failures 503."""
+    fid = _file(client)
+    rt = client.app.state.runtime_holder.get()
+
+    def unavailable(_key):
+        """Simulate a Blob SDK/network failure."""
+        raise RuntimeError("blob service down")
+
+    monkeypatch.setattr(rt.blobs, "get", unavailable)
+    r = client.get(f"/api/files/{fid}/preview")
+    assert r.status_code == 503 and r.json()["code"] == "storage_unavailable"
+    monkeypatch.undo()
+    for p in tmp_path.rglob("*"):
+        if p.is_file():
+            p.unlink()
+    r = client.get(f"/api/files/{fid}/preview")
+    assert r.status_code == 410 and r.json()["code"] == "file_gone"
+    assert client.put(f"/api/files/{fid}/mapping", json=_CANON_MAP, headers=H).status_code == 410
+
+
+def test_worksheet_refused_for_csv(client):
+    """Naming a worksheet for a CSV/JSON file is a 422 at preview and mapping."""
+    fid = _file(client)
+    assert client.get(f"/api/files/{fid}/preview", params={"worksheet": "S"}).status_code == 422
+    assert client.put(f"/api/files/{fid}/mapping", json={**_CANON_MAP, "worksheet": "S"},
+                      headers=H).status_code == 422
