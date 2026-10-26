@@ -18,7 +18,7 @@ def _public_tables(url: str) -> set[str]:
 def test_migrations_apply_once(db_url):
     """First run applies 001 and 002; second run applies nothing."""
     with connect(db_url) as conn:
-        assert run_migrations(conn) == ["001_auth_limits", "002_reports_files"]
+        assert run_migrations(conn) == ["001_auth_limits", "002_reports_files", "004_knowledge_base"]
         assert run_migrations(conn) == []
         row = conn.execute("SELECT count(*) AS n FROM users").fetchone()
     assert row["n"] == 0
