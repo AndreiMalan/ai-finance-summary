@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(10, ge=1)
     max_files_per_report: int = Field(5, ge=1)
 
+    blob_backend: Literal["local", "vercel"] = "local"  # "vercel" = private Vercel Blob store (D-021)
+    local_blob_dir: str = ".local_blobs"  # root directory of the local blob store (dev/tests)
+
     detect_sample_rows: int = Field(200, ge=10)  # rows sampled per column for detection
     detect_header_scan_rows: int = Field(20, ge=1)  # grid rows scanned to find the header
     mapping_min_confidence: float = Field(0.8, ge=0.0, le=1.0)  # below -> user must confirm the mapping
