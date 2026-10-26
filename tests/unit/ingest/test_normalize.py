@@ -89,14 +89,49 @@ def test_warning_resolved_excluded_removes_its_rows():
         [(4, ["inconsistent_unit"]), (5, ["inconsistent_unit"])]
 
 
-def test_fixed_error_still_excludes_rows_that_fail_parsing():
-    """Marking an error "fixed" without fixing the data still excludes the failing row, with its reason."""
-    t = _t([["2024-13", "Cluj", "HICP", "1", "%"], ["2024-02", "Cluj", "HICP", "2", "%"]])
+# Superseded by re-validation (review fix): "fixed" on unchanged data is now refused instead of excluding
+# the failing row. Kept for the record; see test_fixed_*_on_unchanged_data_refused below.
+# def test_fixed_error_still_excludes_rows_that_fail_parsing():
+#     """Marking an error "fixed" without fixing the data still excludes the failing row, with its reason."""
+#     t = _t([["2024-13", "Cluj", "HICP", "1", "%"], ["2024-02", "Cluj", "HICP", "2", "%"]])
+#     report = validate_table(t, MAP, "f1").with_resolution("invalid_date:luna", "fixed")
+#     res = to_observations(t, MAP, REF, report)
+#     assert [o.provenance.row_number for o in res.observations] == [5]
+#     assert len(res.excluded) == 1 and res.excluded[0].row_number == 4
+#     assert _codes(res.excluded[0]) == ["invalid_date"]
+
+
+@pytest.mark.parametrize("rows, issue_id", [
+    ([["2024-13", "Cluj", "HICP", "1", "%"], ["2024-02", "Cluj", "HICP", "2", "%"]], "invalid_date:luna"),
+    ([["2024-01", "Cluj", "HICP", "1", "%"], ["2024-01", "Cluj", "HICP", "2", "%"]], "duplicate_key_conflict:-"),
+    ([["2024-01", "Cluj", "GDP", "1", "EUR"], ["2024-02", "Cluj", "GDP", "2", "RON"]], "inconsistent_unit:um:GDP"),
+])
+def test_fixed_error_on_unchanged_data_refused(rows, issue_id):
+    """"fixed" only counts when re-validation no longer finds the error."""
+    t = _t(rows)
+    report = validate_table(t, MAP, "f1").with_resolution(issue_id, "fixed")
+    assert not report.blocking
+    with pytest.raises(UnresolvedIssues) as exc:
+        to_observations(t, MAP, REF, report)
+    assert exc.value.issue_ids == [issue_id]
+
+
+def test_blocking_and_revalidated_ids_merged_without_duplicates():
+    """Pending ids from the report and re-validation are merged once, in a stable order."""
+    t = _t([["2024-13", "Cluj", "HICP", "1", "%"], ["2024-02", "Atlantis", "HICP", "2", "%"]])
     report = validate_table(t, MAP, "f1").with_resolution("invalid_date:luna", "fixed")
-    res = to_observations(t, MAP, REF, report)
-    assert [o.provenance.row_number for o in res.observations] == [5]
-    assert len(res.excluded) == 1 and res.excluded[0].row_number == 4
-    assert _codes(res.excluded[0]) == ["invalid_date"]
+    with pytest.raises(UnresolvedIssues) as exc:
+        to_observations(t, MAP, REF, report)
+    assert exc.value.issue_ids == ["unknown_region:judet", "invalid_date:luna"]
+
+
+@pytest.mark.parametrize("update", [{"file_id": "other"}, {"row_count": 99}])
+def test_mismatched_report_rejected(update):
+    """A report for another file or another table shape is refused."""
+    t = _t([["2024-01", "Cluj", "HICP", "1", "%"]])
+    report = validate_table(t, MAP, "f1").model_copy(update=update)
+    with pytest.raises(ValueError):
+        to_observations(t, MAP, REF, report)
 
 
 def test_unit_multiplier_carried_value_not_scaled():

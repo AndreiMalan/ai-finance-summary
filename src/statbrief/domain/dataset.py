@@ -16,7 +16,7 @@ IssueCode = Literal[
 ]
 Resolution = Literal["pending", "excluded", "fixed", "accepted"]
 # Resolutions that clear an error; "accepted" is only meaningful for warnings.
-_ERROR_CLEARING: frozenset[str] = frozenset({"excluded", "fixed"})
+ERROR_CLEARING_RESOLUTIONS: frozenset[str] = frozenset({"excluded", "fixed"})
 _CONSTANT_ROLES = ("region", "indicator", "unit")
 
 
@@ -164,7 +164,7 @@ class ValidationReport(BaseModel):
     @property
     def blocking(self) -> bool:
         """True while any error is not excluded or fixed (warnings never block)."""
-        return any(i.severity == "error" and i.resolution not in _ERROR_CLEARING for i in self.issues)
+        return any(i.severity == "error" and i.resolution not in ERROR_CLEARING_RESOLUTIONS for i in self.issues)
 
     def with_resolution(self, issue_id: str, resolution: Resolution) -> "ValidationReport":
         """Copy of the report with one issue's resolution changed.

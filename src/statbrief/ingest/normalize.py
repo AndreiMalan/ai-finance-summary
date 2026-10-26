@@ -1,21 +1,23 @@
 """Turn validated rows into Observations with upload provenance; every exclusion is listed with reasons.
 
-Normalization refuses to run while the report is blocking (an error neither excluded nor fixed). A row
-is excluded — never silently dropped — when any of these holds, and each applicable reason is listed
+The report must belong to this file and table (same file_id and row count) or ValueError is raised.
+Normalization refuses to run (UnresolvedIssues) while the report is blocking (an error neither excluded
+nor fixed) or while re-validating the table still finds an error that the report does not resolve as
+"excluded": "fixed" only counts once re-validation no longer finds the error. A row is excluded — never silently dropped — when any of these holds, and each applicable reason is listed
 once (deduplicated by issue/problem code):
-- it is a later occurrence named in the `duplicate_row` issue (only the first occurrence is kept,
-  whatever the issue's resolution);
+- it is a later occurrence named in the `duplicate_row` issue: only the first occurrence is kept,
+  whatever the issue's resolution — "accepting" the duplicate_row warning still keeps only the first;
 - it belongs to an issue (error or warning) resolved as "excluded";
-- it still has a row-level error after parsing. "fixed" is a claim by the user: re-validating the
-  corrected data is the caller's job, so rows that still fail parsing are excluded with their reason.
+- it still has a row-level error after parsing (a safety net; such errors are normally excluded issues).
 """
 from dataclasses import dataclass, field
 
-# _ERROR_CLEARING is shared with ValidationReport.blocking so the two definitions cannot drift.
-from statbrief.domain.dataset import _ERROR_CLEARING, ColumnMapping, DatasetRef, ValidationReport
+# Shared with ValidationReport.blocking so the two definitions cannot drift.
+from statbrief.domain.dataset import ERROR_CLEARING_RESOLUTIONS, ColumnMapping, DatasetRef, ValidationReport
 from statbrief.domain.observation import Observation, UploadProvenance, make_obs_id
 from statbrief.ingest.readers import RawTable
 from statbrief.ingest.rows import ParsedRow, parse_rows
+from statbrief.ingest.validate import validate_table
 
 # Issue codes whose rows are always excluded (the rows listed are the later, redundant occurrences).
 _ALWAYS_EXCLUDED_CODES: frozenset[str] = frozenset({"duplicate_row"})
@@ -49,7 +51,23 @@ class NormalizationResult:
 
 def _blocking_ids(report: ValidationReport) -> list[str]:
     """Ids of errors whose resolution does not clear them (same rule as `report.blocking`)."""
-    return [i.issue_id for i in report.issues if i.severity == "error" and i.resolution not in _ERROR_CLEARING]
+    return [i.issue_id for i in report.issues if i.severity == "error" and i.resolution not in ERROR_CLEARING_RESOLUTIONS]
+
+
+def _revalidated_ids(table: RawTable, mapping: ColumnMapping, ref: DatasetRef,
+                     report: ValidationReport) -> list[str]:
+    """Ids of errors that re-validation still finds and that the passed report does not resolve as excluded."""
+    excluded = {i.issue_id for i in report.issues if i.resolution == _EXCLUDED}
+    fresh = validate_table(table, mapping, ref.file_id)
+    return [i.issue_id for i in fresh.issues if i.severity == "error" and i.issue_id not in excluded]
+
+
+def _check_report_matches(table: RawTable, ref: DatasetRef, report: ValidationReport) -> None:
+    """Raise ValueError when the report was produced for another file or another table."""
+    if report.file_id != ref.file_id:
+        raise ValueError(f"report is for file {report.file_id!r}, not {ref.file_id!r}")
+    if report.row_count != len(table.rows):
+        raise ValueError(f"report covers {report.row_count} rows, table has {len(table.rows)}")
 
 
 def _issue_reasons(report: ValidationReport) -> dict[int, dict[str, str]]:
@@ -91,9 +109,12 @@ def to_observations(table: RawTable, mapping: ColumnMapping, ref: DatasetRef,
                     report: ValidationReport) -> NormalizationResult:
     """Normalize a table whose errors have all been resolved; every excluded row is listed with reasons.
 
-    Raises UnresolvedIssues (with the blocking issue ids) while `report.blocking` is true.
+    Raises ValueError when the report does not match `ref`/`table`, and UnresolvedIssues with the
+    blocking ids of the report followed by errors re-validation still finds (de-duplicated, stable order).
+    Exclusions come from the passed report's resolutions.
     """
-    blocking = _blocking_ids(report)
+    _check_report_matches(table, ref, report)
+    blocking = list(dict.fromkeys(_blocking_ids(report) + _revalidated_ids(table, mapping, ref, report)))
     if blocking:
         raise UnresolvedIssues(blocking)
     issue_reasons = _issue_reasons(report)
