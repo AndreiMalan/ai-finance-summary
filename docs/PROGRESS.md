@@ -11,7 +11,7 @@ task: 1
 task_title: Dependencies and domain contracts
 phase: implementing
 branch: m2-ingestion
-base_commit: BASE
+base_commit: d1324f5
 last_verified_commit: 517d707
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
 next_action: Task 1 implementer running; then review, then Tasks 2-9 in order (subagent-driven-development). After Task 9: deploy preview, set BLOB_BACKEND=vercel in Vercel (Production+Preview), live upload test, final review + QA + retro, merge.
