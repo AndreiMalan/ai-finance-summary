@@ -87,3 +87,7 @@ Rationale: final M1 review — a cold start with the database down was unbounded
 ## D-024 — Login throttle key is the normalised email
 2026-10-26 · The per-email login throttle key is `normalize_email(raw)` (falling back to `raw.strip().lower()` for invalid input), then capped at 254 characters; the same key is recorded and echoed in the form.
 Rationale: final M1 review — truncating before normalising let whitespace-padded or re-cased variants of one address each get a fresh failure budget (AC 4 bypass).
+
+## D-025 — Embedded objects and external links in workbooks
+2026-10-26 · `.xlsx` files containing embedded OLE objects (`xl/embeddings/*`) or external workbook links (`xl/externalLinks/*`) are accepted: embedded objects are never opened and links are never followed; only cell values stored in the workbook are read (`data_only=True`). Macro-bearing content (vbaProject.bin, XLM macro sheets, dialog sheets, ActiveX, macro-enabled content types; VBA storages in `.xls`) is rejected (Task 2 review).
+Rationale: real-world statistical workbooks often carry logos or links; rejecting them would block legitimate files without improving safety, since nothing in them is executed.
