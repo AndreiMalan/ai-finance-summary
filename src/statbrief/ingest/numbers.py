@@ -98,6 +98,11 @@ def parse_number(value: Any, decimal: Literal[".", ","] | None = None) -> float 
     return result
 
 
+def is_thousands_lookalike(value: Any) -> bool:
+    """True for a string such as "1,234" / "1.234" that reads as thousands or as a decimal alike."""
+    return isinstance(value, str) and bool(_THOUSANDS_LOOKALIKE.match(_SPACES.sub("", value)))
+
+
 def infer_decimal(values: Iterable[Any]) -> Literal[".", ","] | None:
     """Dominant decimal separator among string cells, or None when undecided.
 

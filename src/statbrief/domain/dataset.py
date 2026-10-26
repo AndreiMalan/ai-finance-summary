@@ -12,7 +12,7 @@ DecimalSep = Literal["auto", ".", ","]
 IssueCode = Literal[
     "missing_required", "duplicate_row", "duplicate_key_conflict", "missing_value", "invalid_date",
     "ambiguous_date", "non_numeric", "inconsistent_unit", "unknown_region", "undocumented_column",
-    "formula_without_value", "frequency_mismatch",
+    "formula_without_value", "frequency_mismatch", "ambiguous_number",
 ]
 Resolution = Literal["pending", "excluded", "fixed", "accepted"]
 # Resolutions that clear an error; "accepted" is only meaningful for warnings.
