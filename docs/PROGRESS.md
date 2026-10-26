@@ -6,15 +6,15 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M2
-task: 0
-task_title: Write M2 implementation plan (schema + file ingestion + chunked uploads to private Blob)
-phase: planning
-branch: main
-base_commit: 52c5234
+milestone: M1-hardening
+task: final-review fixes (items 1-13)
+task_title: Fix M1 final review findings (7.5/10) on branch m1-hardening, then re-review, merge, start M2
+phase: reviewing
+branch: m1-hardening
+base_commit: 9e893de
 last_verified_commit: 52c5234
-plan: (to be written) docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: Write the M2 plan from docs/architecture.md §7 (M2 tasks), spec AC 9-19, decisions D-020/D-021; then create branch m2-ingestion and execute with subagent-driven-development. Pending in parallel: final M1 whole-branch review + QA (fix findings on main); user to lengthen DEMO_USER_PASSWORD in Vercel (healthz shows demo_user misconfigured).
+plan: final review report (items listed in .superpowers/sdd/progress.md) ; M2 plan written: docs/superpowers/plans/2026-10-26-m2-ingestion.md
+next_action: M1 hardening re-review running (diff 9e893de..4bd343b). If APPROVED: merge m1-hardening to main, push, verify production healthz; then create branch m2-ingestion and execute docs/superpowers/plans/2026-10-26-m2-ingestion.md Task 1.
 updated: 2026-10-26
 ```
 
