@@ -5,8 +5,8 @@ from statbrief.auth.users import create_user
 from statbrief.domain.dataset import ColumnMapping, DatasetRef, ValidationIssue, ValidationReport
 from statbrief.domain.observation import Observation, UploadProvenance
 from statbrief.storage.db import bootstrap, create_pool
-from statbrief.storage.repos import (FileRepo, MappingRepo, ObservationRepo, ReportRepo, UploadRepo,
-                                     ValidationRepo)
+from statbrief.storage.repos import (FileLimitReached, FileRepo, MappingRepo, ObservationRepo, ReportRepo,
+                                     UploadGone, UploadRepo, ValidationRepo)
 
 
 @pytest.fixture
@@ -309,3 +309,97 @@ def test_concurrent_replace_for_same_file_serialises(ctx):
         release.set()
         assert (first.result(timeout=10), second.result(timeout=10)) == (3, 4)
     assert sorted(o.obs_id for o in repo.list_for_report(a.id, ref.report_id)) == sorted(o.obs_id for o in set2)
+
+
+def _staged(pool, user, rep, n=1):
+    """Open `n` uploads for the report; return their ids."""
+    return [UploadRepo(pool).start(user.id, str(rep["id"]), "f.csv", total_bytes=3, chunk_count=1)
+            for _ in range(n)]
+
+
+def test_count_open_uploads(ctx):
+    """Open (staged) uploads are counted per user and report."""
+    pool, a, b, rep = ctx
+    _staged(pool, a, rep, 2)
+    assert UploadRepo(pool).count_open(a.id, str(rep["id"])) == 2
+    assert UploadRepo(pool).count_open(b.id, str(rep["id"])) == 0
+    assert UploadRepo(pool).count_open(a.id, "garbage") == 0
+
+
+def test_add_from_upload_consumes_upload_and_enforces_limit(ctx):
+    """The file row replaces the upload atomically; the limit, a gone upload and foreign reports are refused."""
+    pool, a, b, rep = ctx
+    files = FileRepo(pool)
+    u1, u2 = _staged(pool, a, rep, 2)
+    files.add_from_upload(_ref(a, rep), u1, max_files=1)
+    assert UploadRepo(pool).get(a.id, u1) is None and files.count_for_report(a.id, str(rep["id"])) == 1
+    with pytest.raises(UploadGone):
+        files.add_from_upload(_ref(a, rep, fid="00000000-0000-0000-0000-000000000002"), u1, max_files=5)
+    with pytest.raises(FileLimitReached):
+        files.add_from_upload(_ref(a, rep, fid="00000000-0000-0000-0000-000000000003"), u2, max_files=1)
+    assert UploadRepo(pool).get(a.id, u2) is not None  # rolled back: still staged
+    with pytest.raises(PermissionError):
+        files.add_from_upload(_ref(b, rep, fid="00000000-0000-0000-0000-000000000004"), u2, max_files=5)
+
+
+def _race(pool, settings, rep, jobs):
+    """Run `jobs` in threads while the report row is locked, then release; return results/exceptions."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from statbrief.storage.db import connect
+
+    with connect(settings.database_url) as locker, ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        with locker.transaction():
+            locker.execute("SELECT 1 FROM reports WHERE id = %s FOR UPDATE", (rep["id"],))
+            futs = [ex.submit(j) for j in jobs]
+            time.sleep(0.3)  # both completions are now waiting on the report lock
+            assert not any(f.done() for f in futs)
+        out = []
+        for f in futs:
+            try:
+                out.append(f.result(timeout=10))
+            except Exception as exc:  # noqa: BLE001 - collected for assertions
+                out.append(exc)
+    return out
+
+
+def test_concurrent_completes_respect_file_limit(ctx, settings):
+    """Two uploads completed at the same time with a limit of 1: exactly one file is stored."""
+    pool, a, b, rep = ctx
+    u1, u2 = _staged(pool, a, rep, 2)
+    files = FileRepo(pool)
+    out = _race(pool, settings, rep, [
+        lambda: files.add_from_upload(_ref(a, rep), u1, max_files=1),
+        lambda: files.add_from_upload(_ref(a, rep, fid="00000000-0000-0000-0000-000000000002"), u2, max_files=1)])
+    assert sum(r is None for r in out) == 1 and sum(isinstance(r, FileLimitReached) for r in out) == 1
+    assert files.count_for_report(a.id, str(rep["id"])) == 1
+
+
+def test_same_upload_completed_twice_stores_one_file(ctx, settings):
+    """Completing one upload twice concurrently stores one file; the other completion finds it gone."""
+    pool, a, b, rep = ctx
+    (u1,) = _staged(pool, a, rep)
+    files = FileRepo(pool)
+    out = _race(pool, settings, rep, [
+        lambda: files.add_from_upload(_ref(a, rep), u1, max_files=5),
+        lambda: files.add_from_upload(_ref(a, rep, fid="00000000-0000-0000-0000-000000000002"), u1, max_files=5)])
+    assert sum(r is None for r in out) == 1 and sum(isinstance(r, UploadGone) for r in out) == 1
+    assert files.count_for_report(a.id, str(rep["id"])) == 1
+
+
+def test_saving_mapping_invalidates_validation_and_observations(ctx):
+    """A new mapping drops the stored validation report and the file's observations; status back to mapped."""
+    pool, a, b, rep = ctx
+    ref = _ref(a, rep)
+    FileRepo(pool).add(ref)
+    m = ColumnMapping(date_col="d", value_col="v", constants={"region": "RO", "indicator": "I", "unit": "%"})
+    MappingRepo(pool).save(a.id, ref.file_id, m)
+    ValidationRepo(pool).save(a.id, ValidationReport(file_id=ref.file_id, row_count=1))
+    ObservationRepo(pool).replace_for_file(a.id, ref.report_id, ref.file_id, _obs(ref, 2))
+    FileRepo(pool).set_status(a.id, ref.file_id, "normalized")
+    MappingRepo(pool).save(a.id, ref.file_id, m.model_copy(update={"date_format": "DMY"}))
+    assert ValidationRepo(pool).get(a.id, ref.file_id) is None
+    assert ObservationRepo(pool).list_for_report(a.id, ref.report_id) == []
+    with pool.connection() as c:
+        assert c.execute("SELECT status FROM files WHERE id = %s", (ref.file_id,)).fetchone()["status"] == "mapped"

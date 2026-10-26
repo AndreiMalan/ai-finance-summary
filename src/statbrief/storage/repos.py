@@ -12,6 +12,17 @@ from psycopg_pool import ConnectionPool
 from statbrief.domain.dataset import ColumnMapping, DatasetRef, ValidationReport
 from statbrief.domain.observation import Observation
 
+# File status after a mapping is (re)saved: validation and normalization must be redone.
+MAPPED_STATUS = "mapped"
+
+
+class FileLimitReached(Exception):
+    """The report already holds the maximum number of files."""
+
+
+class UploadGone(Exception):
+    """The staged upload no longer exists (already completed, or deleted)."""
+
 
 def _uuid(value: str) -> uuid.UUID | None:
     """Parse a UUID; None when malformed (treated as not found)."""
@@ -86,6 +97,33 @@ class FileRepo:
         with self.pool.connection() as c, c.transaction():
             if not _owns_report(c, ref.user_id, ref.report_id):
                 raise PermissionError("report not owned by user")
+            c.execute("INSERT INTO files (id, report_id, user_id, filename, kind, size_bytes, sha256, blob_key) "
+                      "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                      (ref.file_id, ref.report_id, ref.user_id, ref.filename, ref.kind, ref.size_bytes,
+                       ref.sha256, ref.blob_key))
+
+    def add_from_upload(self, ref: DatasetRef, upload_id: str, max_files: int) -> None:
+        """Turn a staged upload into a file row atomically (one transaction).
+
+        The report row is locked FOR UPDATE, so concurrent completions for one report run one after the
+        other: the staged upload is consumed (deleted; UploadGone when it is already gone), the file count
+        is checked against `max_files` (FileLimitReached) and the file row is inserted. Any failure rolls
+        everything back, leaving the upload staged. PermissionError unless ref.user_id owns the report.
+        """
+        with self.pool.connection() as c, c.transaction():
+            if not c.execute("SELECT 1 FROM reports WHERE id = %s AND user_id = %s FOR UPDATE",
+                             (_uuid(ref.report_id), ref.user_id)).fetchone():
+                raise PermissionError("report not owned by user")
+            uid = _uuid(upload_id)
+            gone = uid is None or not c.execute(
+                "DELETE FROM uploads WHERE id = %s AND user_id = %s AND report_id = %s RETURNING id",
+                (uid, ref.user_id, _uuid(ref.report_id))).fetchone()
+            if gone:
+                raise UploadGone(upload_id)
+            n = c.execute("SELECT count(*) AS n FROM files WHERE report_id = %s",
+                          (_uuid(ref.report_id),)).fetchone()["n"]
+            if n >= max_files:
+                raise FileLimitReached(ref.report_id)
             c.execute("INSERT INTO files (id, report_id, user_id, filename, kind, size_bytes, sha256, blob_key) "
                       "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                       (ref.file_id, ref.report_id, ref.user_id, ref.filename, ref.kind, ref.size_bytes,
@@ -181,6 +219,15 @@ class UploadRepo:
             c.execute("INSERT INTO upload_chunks (upload_id, idx, data) VALUES (%s, %s, %s) "
                       "ON CONFLICT (upload_id, idx) DO UPDATE SET data = EXCLUDED.data", (up["id"], idx, data))
 
+    def count_open(self, user_id: str, report_id: str) -> int:
+        """Number of the user's staged (not yet completed) uploads for a report."""
+        rid = _uuid(report_id)
+        if rid is None:
+            return 0
+        with self.pool.connection() as c:
+            return c.execute("SELECT count(*) AS n FROM uploads WHERE report_id = %s AND user_id = %s",
+                             (rid, user_id)).fetchone()["n"]
+
     def assemble(self, user_id: str, upload_id: str) -> bytes:
         """Concatenate all chunks in order (ValueError when any is missing or the size is wrong)."""
         up = self._owned(user_id, upload_id)
@@ -208,13 +255,20 @@ class MappingRepo:
         self.pool = pool
 
     def save(self, user_id: str, file_id: str, mapping: ColumnMapping) -> None:
-        """Insert or replace the mapping of the user's file (PermissionError otherwise)."""
+        """Insert or replace the mapping of the user's file (PermissionError otherwise).
+
+        In the same transaction the file's validation report and observations are deleted and its status
+        goes back to "mapped": both were derived under the previous mapping and must be redone.
+        """
         with self.pool.connection() as c, c.transaction():
             if not _owns_file(c, user_id, file_id):
                 raise PermissionError("file not owned by user")
             c.execute("INSERT INTO file_mappings (file_id, mapping) VALUES (%s, %s) ON CONFLICT (file_id) "
                       "DO UPDATE SET mapping = EXCLUDED.mapping, updated_at = now()",
                       (file_id, Jsonb(mapping.model_dump(mode="json"))))
+            c.execute("DELETE FROM validation_reports WHERE file_id = %s", (file_id,))
+            c.execute("DELETE FROM observations WHERE file_id = %s AND user_id = %s", (file_id, user_id))
+            c.execute("UPDATE files SET status = %s WHERE id = %s", (MAPPED_STATUS, file_id))
 
     def get(self, user_id: str, file_id: str) -> ColumnMapping | None:
         """The mapping of the user's file."""
