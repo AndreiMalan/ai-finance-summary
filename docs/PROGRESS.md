@@ -9,12 +9,12 @@ This file is updated at **every** step transition (task dispatched, implemented,
 milestone: M2
 task: 9
 task_title: Upload & ingestion JSON API + template download
-phase: implementing
+phase: reviewing
 branch: m2-ingestion
 base_commit: 163a834
 last_verified_commit: f8264af
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: Task 9 implementer running (uploads.py routes, template.py, Runtime.blobs, Settings). Then review; then preview deploy (BLOB_BACKEND=vercel already set) + live upload test via vercel curl; then M2 final whole-branch review + QA + retro; merge to main.
+next_action: Combined T9 review + M2 final whole-branch review + QA running (diff main..b9e3d17). Then developer fixes Critical/Important, preview deploy + live upload test, merge to main. Then M3 ∥ M5 in parallel worktrees.
 updated: 2026-10-26
 ```
 
