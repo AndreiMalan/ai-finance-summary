@@ -100,3 +100,6 @@ Amendment (2026-10-26): no Retro step for this project; milestones end with fina
 ## D-027 — Duplicate rows, "fixed" errors and the blocking pre-check
 2026-10-26 · Later occurrences of identical rows (`duplicate_row` warning) are excluded by default during normalization, whatever the warning's resolution, and are listed among the excluded rows; the first occurrence is kept. A "fixed" resolution never clears an error in normalization: only re-validation that no longer finds the error does (normalization re-validates and blocks on any fresh error not resolved "excluded"). `ValidationReport.blocking` (which treats "fixed" as clearing) is only the UI's pre-check. Saving a new column mapping deletes the file's validation report and observations.
 Rationale: M2 final review — identical rows add no information and would double-count; trusting a user's "fixed" flag on data the server can re-check would let errors through.
+
+## D-028 — HICP series: `prc_hicp_minr` replaces discontinued `prc_hicp_manr`
+2026-10-26 · Eurostat discontinued `prc_hicp_manr` (last data 2025-12). The catalog's `HICP_YOY` uses `prc_hicp_minr` with `coicop18=TOTAL` (verified live during M3). `IND_PROD` additionally pins `indic_bt=PRD`. Supersedes the dataset code in D-005 / spec AC 8.
