@@ -139,12 +139,17 @@ def _is_single_column(sample: str) -> bool:
 def _sniff_delimiter(text: str) -> str | None:
     """Delimiter of a CSV text, or None for a single-column file.
 
-    Only the first `_SNIFF_CHARS` characters are inspected, cut back to the last newline, so
-    csv.Sniffer's backtracking regexes never see a large or unterminated sample.
+    Only the first `_SNIFF_CHARS` characters are inspected, cut back to the last line break, so
+    csv.Sniffer's backtracking regexes never see a large or unterminated sample. Line breaks
+    (CRLF, LF, and the bare CR of "CSV (Macintosh)" exports) are then normalised to LF, because
+    csv.Sniffer only splits lines on LF.
     """
     sample = text[:_SNIFF_CHARS]
-    if len(text) > _SNIFF_CHARS and "\n" in sample:
-        sample = sample[: sample.rindex("\n") + 1]
+    if len(text) > _SNIFF_CHARS:
+        cut = max(sample.rfind("\n"), sample.rfind("\r"))
+        if cut >= 0:
+            sample = sample[: cut + 1]
+    sample = sample.replace("\r\n", "\n").replace("\r", "\n")
     if _is_single_column(sample):
         return None
     try:
@@ -174,6 +179,7 @@ def _read_csv(data: bytes, limits: _Limits) -> Grid:
     here (the csv module refuses them) and flagged in `meta["nul_removed"]`. If decoding had to
     fall back from UTF-8 and the text looks like UTF-8 mojibake, `meta["encoding_suspect"]` is set.
     Row numbers are CSV record numbers: a quoted field spanning several lines counts once.
+    The text is read with `newline=""`, so LF, CRLF and bare-CR line endings all end a record.
     """
     for enc in _ENCODINGS:
         try:
@@ -196,7 +202,7 @@ def _read_csv(data: bytes, limits: _Limits) -> Grid:
         raise UploadRejected("malformed", "This CSV file could not be read.")
     grid = Grid(rows=[], row_numbers=[], meta=meta)
     try:
-        for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=split_on), start=1):
+        for i, row in enumerate(csv.reader(io.StringIO(text, newline=""), delimiter=split_on), start=1):
             _append(grid, [c if c != "" else None for c in row], i, limits)
     except csv.Error as exc:  # e.g. a field larger than the csv module's limit
         raise UploadRejected("malformed", "This CSV file could not be read.") from exc
@@ -388,6 +394,8 @@ def _read_json(data: bytes, limits: _Limits) -> Grid:
             if k not in seen:
                 seen.add(k)
                 columns.append(k)
+    if columns and all(_is_empty(c) for c in columns):  # the header row would vanish and data rows would shift into it
+        raise UploadRejected("malformed", "This JSON table has no usable column names: every key is blank.")
     grid = Grid(rows=[], row_numbers=[], meta={})
     _append(grid, list(columns), 1, limits)
     for i, rec in enumerate(doc, start=2):

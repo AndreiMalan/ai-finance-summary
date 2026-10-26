@@ -389,3 +389,30 @@ def test_xls_column_cap():
     with pytest.raises(UploadRejected) as exc:
         read_grid(SAMPLE_XLS.read_bytes(), "xls", max_columns=2)
     assert exc.value.code == "too_large"
+
+
+@pytest.mark.parametrize("data", [b"a;b\r1;2\r", b"a;b\r1;2"])
+def test_csv_cr_only_line_endings(data):
+    """Classic Mac ("CSV (Macintosh)") files end lines with a bare CR and still parse."""
+    g = read_grid(data, "csv")
+    assert g.meta["delimiter"] == ";" and g.rows == [["a", "b"], ["1", "2"]] and g.row_numbers == [1, 2]
+
+
+def test_csv_cr_only_single_column():
+    """Single-column detection also splits lines on a bare CR."""
+    g = read_grid(b"valoare\r7,4\r7,1\r", "csv")
+    assert g.meta["delimiter"] is None and g.rows == [["valoare"], ["7,4"], ["7,1"]]
+
+
+def test_json_all_blank_keys_rejected():
+    """Records whose keys are all blank have no usable columns: malformed, not a later ValueError."""
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(json.dumps([{" ": 1}, {" ": 2}]).encode(), "json")
+    assert exc.value.code == "malformed"
+
+
+def test_csv_cr_only_larger_than_sniff_sample():
+    """A CR-only file longer than the sniff sample is cut at a CR and still detected as delimited."""
+    data = b"a;b\r" + b"".join(f"{i};{i}\r".encode() for i in range(2000))
+    g = read_grid(data, "csv")
+    assert g.meta["delimiter"] == ";" and len(g.rows) == 2001 and g.rows[-1] == ["1999", "1999"]
