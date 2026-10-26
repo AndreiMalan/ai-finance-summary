@@ -29,11 +29,17 @@ _PLAIN_NUMBER = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
 _GROUPED = {sep: re.compile(rf"^[+-]?\d{{1,3}}(?:{re.escape(sep)}\d{{3}})+$") for sep in ",."}
 # "1,234" / "1.234": one separator followed by exactly three digits reads as thousands or as a
 # decimal, so such values are no evidence for either separator in infer_decimal.
-_THOUSANDS_LOOKALIKE = re.compile(r"^[+-]?\d{1,3}[.,]\d{3}$")
+# A zero head ("0,123") cannot be a thousands grouping, so it is a plain decimal.
+_THOUSANDS_LOOKALIKE = re.compile(r"^[+-]?[1-9]\d{0,2}[.,]\d{3}$")
 
 
 class NumberError(ValueError):
     """A cell is not numeric."""
+
+
+def _clean(s: str) -> str:
+    """Spaces/NBSP/apostrophes removed and one trailing "%" dropped; shared by parsing and inference."""
+    return _SPACES.sub("", s).removesuffix("%")
 
 
 def _last_separator(s: str) -> Literal[".", ","]:
@@ -81,7 +87,7 @@ def parse_number(value: Any, decimal: Literal[".", ","] | None = None) -> float 
     s = str(value).strip()
     if s.lower() in MISSING_TOKENS:
         return None
-    s = _SPACES.sub("", s).removesuffix("%")
+    s = _clean(s)
     if decimal is None:
         if "," in s and "." in s:
             decimal = _last_separator(s)
@@ -99,31 +105,36 @@ def parse_number(value: Any, decimal: Literal[".", ","] | None = None) -> float 
 
 
 def is_thousands_lookalike(value: Any) -> bool:
-    """True for a string such as "1,234" / "1.234" that reads as thousands or as a decimal alike."""
-    return isinstance(value, str) and bool(_THOUSANDS_LOOKALIKE.match(_SPACES.sub("", value)))
+    """True for a string such as "1,234" / "1.234%" that reads as thousands or as a decimal alike."""
+    return isinstance(value, str) and bool(_THOUSANDS_LOOKALIKE.match(_clean(value)))
+
+
+def decimal_evidence(value: Any) -> Literal[".", ","] | None:
+    """The decimal separator one cell is evidence for, or None.
+
+    Evidence: a plain decimal ("7,4" / "7.4%"), or a well-grouped value with both separators
+    ("1.234,5" / "1,234.5"), which supports the one occurring last. Thousands look-alikes such as
+    "1,234" are no evidence: they would support either separator.
+    """
+    if not isinstance(value, str):
+        return None
+    s = _clean(value)
+    if _THOUSANDS_LOOKALIKE.match(s):
+        return None
+    if "," in s and "." in s:
+        sep = _last_separator(s)
+        return sep if _to_plain(s, sep) is not None else None
+    if _DEC_COMMA.match(s):
+        return ","
+    if _DEC_DOT.match(s):
+        return "."
+    return None
 
 
 def infer_decimal(values: Iterable[Any]) -> Literal[".", ","] | None:
-    """Dominant decimal separator among string cells, or None when undecided.
-
-    Evidence: a plain decimal ("7,4" / "7.4"), or a well-grouped value with both separators
-    ("1.234,5" / "1,234.5"), which supports the one occurring last. Thousands look-alikes such as
-    "1,234" are skipped: they would support either separator.
-    """
-    comma = dot = 0
-    for v in values:
-        if isinstance(v, str):
-            s = _SPACES.sub("", v)
-            if _THOUSANDS_LOOKALIKE.match(s):
-                continue
-            if "," in s and "." in s:
-                sep = _last_separator(s)
-                if _to_plain(s, sep) is not None:
-                    comma += sep == ","
-                    dot += sep == "."
-                continue
-            comma += bool(_DEC_COMMA.match(s))
-            dot += bool(_DEC_DOT.match(s))
+    """Dominant decimal separator among string cells (see `decimal_evidence`), or None when undecided."""
+    evidence = [decimal_evidence(v) for v in values]
+    comma, dot = evidence.count(","), evidence.count(".")
     if comma == dot:
         return None
     return "," if comma > dot else "."

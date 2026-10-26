@@ -37,6 +37,7 @@ class RowProblem:
     column: str | None
     message: str
     severity: Literal["error", "warning"] = "error"
+    value: str | None = None  # repr of the offending raw cell, for grouped messages
 
 
 @dataclass
@@ -90,16 +91,19 @@ def _options(table: RawTable, mapping: ColumnMapping) -> _Options:
     return _Options(day_order, mapping.date_format == "excel_serial", decimal, decimal is not None)
 
 
-def _cells(table: RawTable, row: list[Any], mapping: ColumnMapping) -> dict[str, Any]:
+def _shown(v: Any) -> str:
+    """repr of a raw cell for messages (strings trimmed)."""
+    return repr(v.strip() if isinstance(v, str) else v)
+
+
+def _column_indices(table: RawTable, mapping: ColumnMapping) -> dict[str, int | None]:
+    """Mapped column → its position in the table, or None when the table lacks it (computed once per table)."""
+    return {c: table.column_index(c) if c in table.columns else None for c in mapping.mapped_columns()}
+
+
+def _cells(row: list[Any], indices: dict[str, int | None]) -> dict[str, Any]:
     """Mapped column → cell value (`_ABSENT` when the table lacks the column; None past a short row)."""
-    out = {}
-    for c in mapping.mapped_columns():
-        if c not in table.columns:
-            out[c] = _ABSENT
-        else:
-            idx = table.column_index(c)
-            out[c] = row[idx] if idx < len(row) else None
-    return out
+    return {c: _ABSENT if i is None else (row[i] if i < len(row) else None) for c, i in indices.items()}
 
 
 def _unreadable_problems(cells: dict[str, Any]) -> list[RowProblem]:
@@ -125,7 +129,7 @@ def _parse_period(pr: ParsedRow, value: Any, column: str, opts: _Options) -> Non
     try:
         pr.period = parse_period(value, day_order=opts.day_order, excel_serial=opts.excel_serial)
     except PeriodError as exc:
-        pr.problems.append(RowProblem(exc.code, column, str(exc)))
+        pr.problems.append(RowProblem(exc.code, column, str(exc), value=_shown(value)))
 
 
 def _parse_region(pr: ParsedRow, value: Any, column: str | None) -> None:
@@ -133,7 +137,8 @@ def _parse_region(pr: ParsedRow, value: Any, column: str | None) -> None:
     if _blank(value):
         pr.problems.append(RowProblem("missing_required", column, "Region is empty."))
     elif (match := resolve_region(value)) is None:
-        pr.problems.append(RowProblem("unknown_region", column, f"Unknown region {str(value).strip()!r}."))
+        pr.problems.append(RowProblem("unknown_region", column, f"Unknown region {_shown(value)}.",
+                                      value=_shown(value)))
     else:
         pr.region = match
 
@@ -157,13 +162,15 @@ def _parse_value(pr: ParsedRow, value: Any, column: str, opts: _Options) -> None
     """Fill the value; record ambiguous_number / non_numeric (errors) or missing_value (warning)."""
     if not opts.decimal_decided and is_thousands_lookalike(value):
         pr.problems.append(RowProblem("ambiguous_number", column,
-                                      f"Is {str(value).strip()!r} a decimal or a whole number with a thousands "
-                                      "separator? Choose the decimal separator in the mapping."))
+                                      f"Is {_shown(value)} a decimal or a whole number with a thousands "
+                                      "separator? Choose the decimal separator in the mapping.",
+                                      value=_shown(value)))
         return
     try:
         pr.value = parse_number(value, opts.decimal)
     except NumberError:
-        pr.problems.append(RowProblem("non_numeric", column, f"{value!r} is not a number."))
+        pr.problems.append(RowProblem("non_numeric", column, f"{_shown(value)} is not a number.",
+                                      value=_shown(value)))
         return
     if pr.value is None:
         pr.problems.append(RowProblem("missing_value", column, "Value is missing.", "warning"))
@@ -172,10 +179,11 @@ def _parse_value(pr: ParsedRow, value: Any, column: str, opts: _Options) -> None
 def parse_rows(table: RawTable, mapping: ColumnMapping) -> list[ParsedRow]:
     """Parse every data row; never drops a row (problems are attached instead)."""
     opts = _options(table, mapping)
+    indices = _column_indices(table, mapping)
     out = []
     for raw, rn in zip(table.rows, table.row_numbers, strict=True):
         pr = ParsedRow(row_number=rn)
-        cells = _cells(table, raw, mapping)
+        cells = _cells(raw, indices)
         pr.problems.extend(_unreadable_problems(cells))
         if not _unreadable(cells[mapping.date_col]):
             _parse_period(pr, cells[mapping.date_col], mapping.date_col, opts)

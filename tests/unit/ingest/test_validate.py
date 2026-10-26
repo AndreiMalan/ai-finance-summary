@@ -130,3 +130,57 @@ def test_mapped_column_absent_from_table_is_reported():
                       constants={"indicator": "HICP", "unit": "%"})
     issues = _issues(validate_table(t, m, "f1"))
     assert issues == {"missing_required:judet": ("error", [2])}
+
+
+def test_percent_suffix_does_not_bypass_lookalike_check():
+    """'1,234%' is as ambiguous as '1,234'; '%' values also count as decimal evidence."""
+    t, m = _value_table(["1,234%"])
+    assert [p.code for p in parse_rows(t, m)[0].problems] == ["ambiguous_number"]
+    t, m = _value_table(["7.4%", "1,234%"])
+    assert [r.value for r in parse_rows(t, m)] == [7.4, 1234.0]
+
+
+def test_zero_head_is_not_a_thousands_lookalike():
+    """'0,123' / '-0.123' cannot be thousands, so they parse as decimals without an ambiguity error."""
+    t, m = _value_table(["0,123", "-0.123"])
+    rows = parse_rows(t, m)
+    assert [r.value for r in rows] == [0.123, -0.123] and all(r.ok for r in rows)
+
+
+def test_mixed_decimal_separators_warn():
+    """Equal evidence for ',' and '.' yields an explicit warning on the value column."""
+    t, m = _value_table(["7,4", "7.4"])
+    issues = _issues(validate_table(t, m, "f1", known_columns=frozenset({"val_adj_x"})))
+    assert issues == {"ambiguous_number:valoare:mixed": ("warning", [4, 5])}
+    report = validate_table(t, m, "f1", known_columns=frozenset({"val_adj_x"}))
+    assert report.issues[0].message == ("Both ',' and '.' are used as decimal separators; "
+                                        "choose one in the mapping.")
+
+
+def test_unit_scale_differences():
+    """'5 EUR' vs '5 thousand EUR' for one key is a conflict; across periods it is a scale warning."""
+    t = _table([["2024-01", "Cluj", "GDP", 5, "EUR", 1], ["2024-01", "Cluj", "GDP", 5, "thousand EUR", 1]])
+    issues = _issues(validate_table(t, MAP, "f1", known_columns=frozenset({"val_adj_x"})))
+    assert issues["duplicate_key_conflict:-"] == ("error", [4, 5]) and "duplicate_row:-" not in issues
+    t = _table([["2024-01", "Cluj", "GDP", 5, "EUR", 1], ["2024-02", "Cluj", "GDP", 5, "thousand EUR", 1]])
+    report = validate_table(t, MAP, "f1", known_columns=frozenset({"val_adj_x"}))
+    [issue] = report.issues
+    assert issue.issue_id == "inconsistent_unit:um:GDP" and issue.severity == "warning"
+    assert "different scales" in issue.message and "EUR" in issue.message and "thousand EUR" in issue.message
+
+
+def test_grouped_message_lists_distinct_values():
+    """A grouped issue names every distinct offending value (capped), not only the first."""
+    t = _table([["2024-01", "Atlantis", "X", 1, "%", 1], ["2024-02", "Mordor", "X", 1, "%", 1],
+                ["2024-03", "Atlantis", "X", 1, "%", 1]])
+    [issue] = [i for i in validate_table(t, MAP, "f1").issues if i.code == "unknown_region"]
+    assert "'Atlantis'" in issue.message and "'Mordor'" in issue.message and issue.rows == [4, 5, 6]
+
+
+def test_grouped_message_caps_value_list():
+    """More distinct values than the cap are summarised as '(+N more)'."""
+    from statbrief.ingest.validate import _MAX_VALUES_IN_MESSAGE
+    n = _MAX_VALUES_IN_MESSAGE + 2
+    t = _table([[f"2024-{i + 1:02d}", f"Nowhere{i}", "X", 1, "%", 1] for i in range(n)])
+    [issue] = [i for i in validate_table(t, MAP, "f1").issues if i.code == "unknown_region"]
+    assert "(+2 more)" in issue.message and f"'Nowhere{n - 1}'" not in issue.message
