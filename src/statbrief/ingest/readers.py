@@ -2,6 +2,8 @@
 import csv
 import io
 import json
+import math
+import re
 import struct
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,7 +16,17 @@ from statbrief.ingest.sniff import UploadRejected
 
 _ENCODINGS = ("utf-8-sig", "cp1250", "latin-1")  # Romanian sources commonly use cp1250
 _DELIMITERS = ",;\t|"
-_SNIFF_BYTES = 64 * 1024
+# Characters (not bytes) of decoded text given to csv.Sniffer, cut back to the last full line:
+# the Sniffer's regexes backtrack badly on hostile input, so its input must stay small.
+_SNIFF_CHARS = 4096
+# Delimiters for single-column files: the first one absent from the text is used, so no split happens.
+_NO_SPLIT_DELIMITERS = ("\x1f", "\x1e", "\ufffe", "\uffff")
+# A whole line that is one decimal-comma number (optionally quoted), e.g. 7,4 or "-1234,5".
+_DECIMAL_COMMA_VALUE = re.compile(r'\s*"?[-+]?\d+,\d+"?\s*')
+# Characters whose UTF-8 bytes, wrongly decoded as cp1250/latin-1, betray mojibake (e.g. "ț" → "Č›").
+# Whole two/three-character sequences are matched, not lone letters, so genuine cp1250 text such as
+# "CĂLĂRAȘI" or German "Ä" is not flagged.
+_MOJIBAKE_SOURCE_CHARS = "ăâîșțşţĂÂÎȘȚŞŢéèáóúüöä€–—“”„’"
 _JSON_TABLE_KEYS = ("data", "records", "rows")
 # xlrd 2.0.2 raises XLRDError with exactly this text when it meets a FILEPASS record.
 _XLRD_ENCRYPTED_MESSAGE = "Workbook is encrypted"
@@ -80,9 +92,18 @@ def _is_empty(v: Any) -> bool:
     return v is None or (isinstance(v, str) and not v.strip())
 
 
-def _append(grid: Grid, cells: list[Any], row_number: int, max_rows: int | None) -> None:
-    """Add a non-empty row, enforcing the row limit."""
-    if all(_is_empty(c) for c in cells):
+def _append(grid: Grid, cells: list[Any], row_number: int, max_rows: int | None,
+            max_scan_rows: int | None = None) -> None:
+    """Add a non-empty row, enforcing the row limit and the scanned-row limit.
+
+    `row_number` is the 1-based position in the source, so every scanned row (including empty
+    ones) counts toward `max_scan_rows`. Trailing empty cells are trimmed.
+    """
+    if max_scan_rows is not None and row_number > max_scan_rows:
+        raise UploadRejected("too_large", f"The file has more than {max_scan_rows} rows (including empty ones).")
+    while cells and _is_empty(cells[-1]):
+        cells.pop()
+    if not cells or all(_is_empty(c) for c in cells):
         return
     if max_rows is not None and len(grid.rows) >= max_rows:
         raise UploadRejected("too_large", f"The file has more than {max_rows} rows.")
@@ -90,11 +111,57 @@ def _append(grid: Grid, cells: list[Any], row_number: int, max_rows: int | None)
     grid.row_numbers.append(row_number)
 
 
-def _read_csv(data: bytes, max_rows: int | None) -> Grid:
+def _is_single_column(sample: str) -> bool:
+    """True if the first non-empty line has no delimiter and later lines are plain values.
+
+    "Plain" means no candidate delimiter at all, or only a decimal-comma number such as 7,4.
+    A title line followed by delimited rows ("IRS regional" then "a,b") is NOT single-column.
+    """
+    lines = [line for line in sample.splitlines() if line.strip()]
+    if not lines or any(d in lines[0] for d in _DELIMITERS):
+        return False
+    return all(not any(d in line for d in _DELIMITERS) or _DECIMAL_COMMA_VALUE.fullmatch(line)
+               for line in lines[1:])
+
+
+def _sniff_delimiter(text: str) -> str | None:
+    """Delimiter of a CSV text, or None for a single-column file.
+
+    Only the first `_SNIFF_CHARS` characters are inspected, cut back to the last newline, so
+    csv.Sniffer's backtracking regexes never see a large or unterminated sample.
+    """
+    sample = text[:_SNIFF_CHARS]
+    if len(text) > _SNIFF_CHARS and "\n" in sample:
+        sample = sample[: sample.rindex("\n") + 1]
+    if _is_single_column(sample):
+        return None
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=_DELIMITERS).delimiter
+    except csv.Error:
+        return ","
+
+
+def _mojibake_markers(encoding: str) -> frozenset[str]:
+    """How `_MOJIBAKE_SOURCE_CHARS` look when their UTF-8 bytes are decoded with `encoding`."""
+    markers = set()
+    for ch in _MOJIBAKE_SOURCE_CHARS:
+        try:
+            markers.add(ch.encode("utf-8").decode(encoding))
+        except UnicodeDecodeError:  # bytes undefined in this code page cannot appear in its text
+            continue
+    return frozenset(markers)
+
+
+_MOJIBAKE_MARKERS = {enc: _mojibake_markers(enc) for enc in _ENCODINGS[1:]}
+
+
+def _read_csv(data: bytes, max_rows: int | None, max_scan_rows: int | None) -> Grid:
     """Decode with a fallback chain, sniff the delimiter, keep cells as strings.
 
     Upload sniffing only probes the first bytes for NULs, so any later NUL characters are removed
-    here (the csv module refuses them) and flagged in `meta["nul_removed"]`.
+    here (the csv module refuses them) and flagged in `meta["nul_removed"]`. If decoding had to
+    fall back from UTF-8 and the text looks like UTF-8 mojibake, `meta["encoding_suspect"]` is set.
+    Row numbers are CSV record numbers: a quoted field spanning several lines counts once.
     """
     for enc in _ENCODINGS:
         try:
@@ -105,18 +172,20 @@ def _read_csv(data: bytes, max_rows: int | None) -> Grid:
     else:  # pragma: no cover - latin-1 always decodes
         raise UploadRejected("malformed", "The file's text encoding is not supported.")
     meta: dict[str, Any] = {"encoding": enc}
+    if any(m in text for m in _MOJIBAKE_MARKERS.get(enc, ())):
+        meta["encoding_suspect"] = True
     if "\x00" in text:
         text = text.replace("\x00", "")
         meta["nul_removed"] = True
-    try:
-        delim = csv.Sniffer().sniff(text[:_SNIFF_BYTES], delimiters=_DELIMITERS).delimiter
-    except csv.Error:
-        delim = ","
+    delim = _sniff_delimiter(text)
     meta["delimiter"] = delim
+    split_on = delim if delim is not None else next((d for d in _NO_SPLIT_DELIMITERS if d not in text), None)
+    if split_on is None:  # pragma: no cover - would need every reserved character in the file
+        raise UploadRejected("malformed", "This CSV file could not be read.")
     grid = Grid(rows=[], row_numbers=[], meta=meta)
     try:
-        for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=delim), start=1):
-            _append(grid, [c if c != "" else None for c in row], i, max_rows)
+        for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=split_on), start=1):
+            _append(grid, [c if c != "" else None for c in row], i, max_rows, max_scan_rows)
     except csv.Error as exc:  # e.g. a field larger than the csv module's limit
         raise UploadRejected("malformed", "This CSV file could not be read.") from exc
     return grid
@@ -128,8 +197,12 @@ def _xlsx_workbooks(data: bytes):
 
     try:
         values = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-        raw = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
     except Exception as exc:  # openpyxl raises many types for corrupt files
+        raise UploadRejected("malformed", "This Excel file could not be read.") from exc
+    try:
+        raw = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
+    except Exception as exc:
+        values.close()
         raise UploadRejected("malformed", "This Excel file could not be read.") from exc
     return values, raw
 
@@ -164,21 +237,28 @@ def list_worksheets(data: bytes, kind: FileKind) -> list[SheetInfo]:
     return []
 
 
-def _read_xlsx(data: bytes, worksheet: str | None, max_rows: int | None) -> Grid:
-    """Cached cell values; formula cells without a cache become FORMULA_NO_VALUE."""
+def _read_xlsx(data: bytes, worksheet: str | None, max_rows: int | None, max_scan_rows: int | None) -> Grid:
+    """Cached cell values; formula cells without a cache become FORMULA_NO_VALUE.
+
+    The declared <dimension> is ignored (`reset_dimensions`): it may understate the data (silent
+    loss) or overstate it (CPU spent padding). Gap rows still count toward `max_scan_rows`.
+    """
     values, raw = _xlsx_workbooks(data)
     try:
         infos = [SheetInfo(ws.title, ws.sheet_state != "visible") for ws in values.worksheets]
         name = _pick_sheet(infos, worksheet)
         grid = Grid(rows=[], row_numbers=[], worksheet=name)
-        raw_rows = raw[name].iter_rows(values_only=True)
-        for i, row in enumerate(values[name].iter_rows(values_only=True), start=1):
+        values_ws, raw_ws = values[name], raw[name]
+        values_ws.reset_dimensions()
+        raw_ws.reset_dimensions()
+        raw_rows = raw_ws.iter_rows(values_only=True)
+        for i, row in enumerate(values_ws.iter_rows(values_only=True), start=1):
             raw_row = next(raw_rows, ())
             cells = []
             for j, v in enumerate(row):
                 r = raw_row[j] if j < len(raw_row) else None
                 cells.append(FORMULA_NO_VALUE if v is None and isinstance(r, str) and r.startswith("=") else v)
-            _append(grid, cells, i, max_rows)
+            _append(grid, cells, i, max_rows, max_scan_rows)
         return grid
     finally:
         values.close()
@@ -228,6 +308,9 @@ def _open_xls(data: bytes) -> xlrd.book.Book:
     except UploadRejected:
         book.release_resources()
         raise
+    except Exception as exc:  # unexpected stream layout: never let the scan crash the upload
+        book.release_resources()
+        raise UploadRejected("malformed", "This .xls file could not be read.") from exc
     return book
 
 
@@ -236,7 +319,7 @@ def _xls_sheet_infos(book: xlrd.book.Book) -> list[SheetInfo]:
     return [SheetInfo(s.name, bool(s.visibility)) for s in book.sheets()]
 
 
-def _read_xls(data: bytes, worksheet: str | None, max_rows: int | None) -> Grid:
+def _read_xls(data: bytes, worksheet: str | None, max_rows: int | None, max_scan_rows: int | None) -> Grid:
     """Legacy Excel via xlrd; date cells converted to datetime."""
     book = _open_xls(data)
     try:
@@ -256,16 +339,29 @@ def _read_xls(data: bytes, worksheet: str | None, max_rows: int | None) -> Grid:
                     cells.append(None)
                 else:
                     cells.append(cell.value)
-            _append(grid, cells, r + 1, max_rows)
+            _append(grid, cells, r + 1, max_rows, max_scan_rows)
         return grid
     finally:
         book.release_resources()
 
 
-def _read_json(data: bytes, max_rows: int | None) -> Grid:
-    """List of objects (optionally wrapped) → header row + value rows."""
+def _reject_non_finite(text: str) -> float:
+    """JSON number/constant parser that refuses NaN, Infinity and floats overflowing to infinity."""
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"non-finite number {text}")
+    return value
+
+
+def _read_json(data: bytes, max_rows: int | None, max_scan_rows: int | None) -> Grid:
+    """List of objects (optionally wrapped) → header row + value rows.
+
+    Row numbers: the header is row 1 and record k (0-based) is row k + 2. Nested values are kept
+    as JSON text; non-finite numbers and tables without any value are rejected.
+    """
     try:
-        doc = json.loads(data.decode("utf-8-sig"))
+        doc = json.loads(data.decode("utf-8-sig"), parse_float=_reject_non_finite,
+                         parse_constant=_reject_non_finite)
     except (ValueError, RecursionError) as exc:  # sniffing normally catches these first
         raise UploadRejected("malformed", "This JSON file could not be parsed.") from exc
     if isinstance(doc, dict):
@@ -281,22 +377,35 @@ def _read_json(data: bytes, max_rows: int | None) -> Grid:
                 seen.add(k)
                 columns.append(k)
     grid = Grid(rows=[], row_numbers=[], meta={})
-    _append(grid, list(columns), 1, max_rows)
+    _append(grid, list(columns), 1, max_rows, max_scan_rows)
     for i, rec in enumerate(doc, start=2):
         cells = [rec.get(c) for c in columns]
-        _append(grid, [json.dumps(v) if isinstance(v, (dict, list)) else v for v in cells], i, max_rows)
+        _append(grid, [json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v for v in cells],
+                i, max_rows, max_scan_rows)
+    if len(grid.rows) < 2:
+        raise UploadRejected("malformed", "This JSON table has no data: every record is empty.")
     return grid
 
 
-def read_grid(data: bytes, kind: FileKind, worksheet: str | None = None, max_rows: int | None = None) -> Grid:
-    """Read any supported file into a grid of raw cells."""
+def read_grid(data: bytes, kind: FileKind, worksheet: str | None = None, max_rows: int | None = None,
+              max_scan_rows: int | None = None) -> Grid:
+    """Read any supported file into a grid of raw cells.
+
+    `max_rows` caps non-empty rows kept; `max_scan_rows` caps source rows scanned, empty ones
+    included (both raise UploadRejected("too_large")). Limits come from the callers' settings.
+    """
     if kind == "csv":
-        return _read_csv(data, max_rows)
+        return _read_csv(data, max_rows, max_scan_rows)
     if kind == "xlsx":
-        return _read_xlsx(data, worksheet, max_rows)
+        return _read_xlsx(data, worksheet, max_rows, max_scan_rows)
     if kind == "xls":
-        return _read_xls(data, worksheet, max_rows)
-    return _read_json(data, max_rows)
+        return _read_xls(data, worksheet, max_rows, max_scan_rows)
+    return _read_json(data, max_rows, max_scan_rows)
+
+
+def _cell(row: list[Any], index: int) -> Any:
+    """Cell at `index`, or None past the end of a ragged row."""
+    return row[index] if index < len(row) else None
 
 
 def _header_name(value: Any, position: int) -> str:
@@ -305,6 +414,8 @@ def _header_name(value: Any, position: int) -> str:
         return f"column_{position}"
     if isinstance(value, datetime):
         return value.date().isoformat()
+    if isinstance(value, float) and value.is_integer():  # xlrd/Excel years: 2024.0 → "2024"
+        return str(int(value))
     return str(value).strip()
 
 
@@ -328,8 +439,12 @@ def to_table(grid: Grid, header_row: int) -> RawTable:
         raise ValueError(f"row {header_row} is empty or outside the table")
     h = grid.row_numbers.index(header_row)
     width = max([len(grid.rows[h])] + [len(r) for r in grid.rows[h + 1:]])
-    header = grid.rows[h] + [None] * (width - len(grid.rows[h]))  # extra data columns get column_N
+    # Trailing columns with a blank header and no values are phantoms (e.g. "a;b;;").
+    while width and _is_empty(_cell(grid.rows[h], width - 1)) and all(
+            _is_empty(_cell(r, width - 1)) for r in grid.rows[h + 1:]):
+        width -= 1
+    header = grid.rows[h][:width] + [None] * (width - len(grid.rows[h]))  # extra data columns get column_N
     names = _unique_names([_header_name(cell, pos) for pos, cell in enumerate(header, start=1)])
-    rows = [r + [None] * (width - len(r)) for r in grid.rows[h + 1:]]
+    rows = [r[:width] + [None] * (width - len(r)) for r in grid.rows[h + 1:]]
     return RawTable(columns=names, rows=rows, row_numbers=grid.row_numbers[h + 1:],
                     worksheet=grid.worksheet, meta=dict(grid.meta))

@@ -1,6 +1,7 @@
 """Builders for upload test files (in memory) and paths to the few committed binary samples."""
 import csv
 import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -35,6 +36,20 @@ def add_zip_member(data: bytes, name: str, content: bytes) -> bytes:
         for item in src.infolist():
             z.writestr(item, src.read(item.filename))
         z.writestr(name, content)
+    return out.getvalue()
+
+
+def edit_xlsx_sheet(data: bytes, dimension: str | None = None, extra_rows_xml: bytes = b"") -> bytes:
+    """Rewrite the first worksheet's XML: replace its declared <dimension> and/or append raw <row>s."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            body = src.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                if dimension is not None:
+                    body = re.sub(rb'<dimension ref="[^"]*"', b'<dimension ref="' + dimension.encode() + b'"', body)
+                body = body.replace(b"</sheetData>", extra_rows_xml + b"</sheetData>")
+            dst.writestr(item, body)
     return out.getvalue()
 
 

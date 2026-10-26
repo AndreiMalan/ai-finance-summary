@@ -1,6 +1,7 @@
 """Tests for reading uploads into grids and tables without executing anything."""
 import json
 import struct
+import time
 from datetime import datetime
 from unittest import mock
 
@@ -10,7 +11,7 @@ import xlrd
 from statbrief.ingest import readers
 from statbrief.ingest.readers import FORMULA_NO_VALUE, list_worksheets, read_grid, to_table
 from statbrief.ingest.sniff import UploadRejected
-from tests.fixtures import (ENCRYPTED_XLS, SAMPLE_XLS, XLM_MACRO_XLS, csv_bytes, xlsx_bytes,
+from tests.fixtures import (ENCRYPTED_XLS, SAMPLE_XLS, XLM_MACRO_XLS, csv_bytes, edit_xlsx_sheet, xlsx_bytes,
                             xlsx_with_formula_no_cache)
 
 
@@ -216,3 +217,135 @@ def test_to_table_duplicate_suffix_never_collides_with_existing_name():
                  header_row=1)
     assert len(set(t.columns)) == len(t.columns)
     assert t.columns[:3] == ["a", "a_3", "a_2"]
+
+
+# --- Fix round 1 regressions -------------------------------------------------------------------
+
+_TEN_ROWS = xlsx_bytes({"S": [["h1", "h2", "h3"]] + [[i, i * 2, i * 3] for i in range(1, 11)]})
+
+
+def test_xlsx_understated_dimension_does_not_lose_cells():
+    """A <dimension> smaller than the data (A1:A3) must not truncate rows or columns."""
+    g = read_grid(edit_xlsx_sheet(_TEN_ROWS, dimension="A1:A3"), "xlsx")
+    assert len(g.rows) == 11 and g.rows[1] == [1, 2, 3] and g.row_numbers[-1] == 11
+
+
+def test_xlsx_overstated_dimension_and_far_empty_cell_are_cheap():
+    """A1:XFD2000 plus an empty styled cell at XFD2000 is fast and yields no phantom columns."""
+    data = edit_xlsx_sheet(_TEN_ROWS, dimension="A1:XFD2000",
+                           extra_rows_xml=b'<row r="2000"><c r="XFD2000" s="0"/></row>')
+    start = time.perf_counter()
+    g = read_grid(data, "xlsx", max_rows=100, max_scan_rows=5000)
+    assert time.perf_counter() - start < 2
+    assert {len(r) for r in g.rows} == {3} and len(to_table(g, 1).columns) == 3
+
+
+def test_xlsx_scan_row_cap_counts_empty_rows():
+    """A lone cell far below the data is rejected by the scanned-row cap, not walked forever."""
+    data = edit_xlsx_sheet(_TEN_ROWS, extra_rows_xml=b'<row r="20000"><c r="A20000" t="inlineStr">'
+                                                     b"<is><t>x</t></is></c></row>")
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(data, "xlsx", max_rows=100, max_scan_rows=1000)
+    assert exc.value.code == "too_large"
+    assert len(read_grid(data, "xlsx", max_scan_rows=20000).rows) == 12
+
+
+def test_csv_scan_row_cap_counts_blank_lines():
+    """Blank CSV lines count toward the scanned-row cap."""
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(b"a\n" + b"\n" * 50 + b"1\n", "csv", max_scan_rows=10)
+    assert exc.value.code == "too_large"
+
+
+@pytest.mark.parametrize("payload", [',"' * 32 * 1024, '"a' * 32000 + "\n", "a," * 40000 + "\n"],
+                         ids=["comma-quote", "quotes", "long-line"])
+def test_csv_sniffer_input_is_bounded(payload):
+    """Pathological text (64 KB of ,\") does not make delimiter sniffing backtrack for long."""
+    start = time.perf_counter()
+    try:
+        read_grid(payload.encode(), "csv")
+    except UploadRejected:
+        pass
+    assert time.perf_counter() - start < 2
+
+
+def test_csv_single_column_with_decimal_commas():
+    """A header without any delimiter means one column; 7,4 is a value, not two cells."""
+    g = read_grid("valoare\n7,4\n7,1".encode(), "csv")
+    assert g.meta["delimiter"] is None and g.rows == [["valoare"], ["7,4"], ["7,1"]]
+
+
+def test_csv_encoding_fallback_flags_mojibake():
+    """UTF-8 text that went through a cp1250/latin-1 round trip is flagged as suspect."""
+    clean = read_grid("județ,x\nIași,1\n".encode(), "csv")
+    assert clean.meta["encoding"] == "utf-8-sig" and "encoding_suspect" not in clean.meta
+    # "ă" is C4 83 in UTF-8; 0x83 is undefined in cp1250, so this falls back to latin-1 ("Ä\x83")
+    g = read_grid("Brăila,x\n1,2\n".encode() + b"\xff,2\n", "csv")
+    assert g.meta["encoding"] == "latin-1" and g.meta["encoding_suspect"] is True
+    plain = read_grid("judeţ,x\nIaşi,1\nCĂLĂRAŞI,2\nÎŞI,3\n".encode("cp1250"), "csv")
+    assert plain.meta["encoding"] == "cp1250" and "encoding_suspect" not in plain.meta
+    # UTF-8 file with one stray byte: decodes as cp1250 into "Č›"-style mojibake
+    mixed = read_grid("județ,x\nIași,1\n".encode() + b"\xff,2\n", "csv")
+    assert mixed.meta["encoding"] == "cp1250" and mixed.meta["encoding_suspect"] is True
+
+
+@pytest.mark.parametrize("raw", [b'[{"a": NaN}]', b'[{"a": Infinity}]', b'[{"a": -Infinity}]', b'[{"a": 1e999}]'])
+def test_json_non_finite_numbers_rejected(raw):
+    """NaN/Infinity and overflowing floats are not data."""
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(raw, "json")
+    assert exc.value.code == "malformed"
+
+
+@pytest.mark.parametrize("raw", [b"[{}]", b'[{"a": null}, {"a": null}]', b'{"rows": [{}, {}]}'])
+def test_json_without_data_rejected(raw):
+    """Objects without any non-empty value are rejected up front."""
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(raw, "json")
+    assert exc.value.code == "malformed" and "no data" in exc.value.message
+
+
+def test_json_nested_values_keep_romanian_text():
+    """Nested values are serialised as readable text (ensure_ascii=False)."""
+    g = read_grid(json.dumps([{"a": "județ", "n": {"x": "Iași"}}]).encode(), "json")
+    assert g.rows[1] == ["județ", '{"x": "Iași"}']
+
+
+def test_to_table_drops_trailing_phantom_columns():
+    """Trailing delimiters create blank, empty columns that are dropped."""
+    assert to_table(read_grid(b"a;b;;\n1;2;;\n3;4;;\n", "csv"), 1).columns == ["a", "b"]
+    # a blank header with data, or a blank in the middle, is kept
+    assert to_table(read_grid(b"a;b;\n1;2;x\n", "csv"), 1).columns == ["a", "b", "column_3"]
+    assert to_table(read_grid(b"a;;c\n1;;3\n", "csv"), 1).columns == ["a", "column_2", "c"]
+
+
+def test_header_integral_floats_have_no_decimal_point():
+    """Year headers read as 2024.0 (xlrd returns every number as float) become '2024'; decimals kept."""
+    t = to_table(readers.Grid(rows=[["an", 2024.0, 2.5, True], [1, 2, 3, 4]], row_numbers=[1, 2]), 1)
+    assert t.columns == ["an", "2024", "2.5", "True"]
+
+
+def test_xlsx_second_load_failure_closes_first_workbook():
+    """If the raw (formula) pass fails, the cached-values workbook is closed."""
+    first = mock.Mock()
+    with mock.patch("openpyxl.load_workbook", side_effect=[first, RuntimeError("boom")]):
+        with pytest.raises(UploadRejected) as exc:
+            read_grid(b"x", "xlsx")
+    assert exc.value.code == "malformed" and first.close.called
+
+
+@pytest.mark.skipif(not SAMPLE_XLS.exists(), reason="tests/data/sample.xls not available")
+def test_xls_scan_crash_is_malformed():
+    """An unexpected error while scanning BIFF records maps to malformed (book released)."""
+    with mock.patch.object(readers, "_xls_has_macro_sheets", side_effect=AttributeError("mem")):
+        with pytest.raises(UploadRejected) as exc:
+            read_grid(SAMPLE_XLS.read_bytes(), "xls")
+    assert exc.value.code == "malformed"
+
+
+@pytest.mark.skipif(not SAMPLE_XLS.exists(), reason="tests/data/sample.xls not available")
+def test_xls_scan_row_cap():
+    """The scanned-row cap applies to legacy .xls too."""
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(SAMPLE_XLS.read_bytes(), "xls", max_scan_rows=2)
+    assert exc.value.code == "too_large"
