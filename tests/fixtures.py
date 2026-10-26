@@ -1,7 +1,8 @@
-"""In-memory builders for upload test files (no files on disk)."""
+"""Builders for upload test files (in memory) and paths to the few committed binary samples."""
 import csv
 import io
 import zipfile
+from pathlib import Path
 
 from openpyxl import Workbook
 
@@ -42,3 +43,14 @@ def csv_bytes(rows: list[list], delimiter: str = ",", encoding: str = "utf-8") -
     buf = io.StringIO()
     csv.writer(buf, delimiter=delimiter, lineterminator="\n").writerows(rows)
     return buf.getvalue().encode(encoding)
+
+
+# Committed legacy .xls samples, saved once with Microsoft Excel (BIFF8, xlExcel8 format):
+#   sample.xls          - visible sheet "Date" (luna/valoare/calc: two dates, numbers, "=1+1" cached as 2)
+#                         plus a hidden sheet "Ascuns" placed first;
+#   xlm_macro_sheet.xls - one worksheet plus an empty Excel 4.0 (XLM) macro sheet;
+#   encrypted.xls       - password-protected (FILEPASS record).
+DATA_DIR = Path(__file__).parent / "data"
+SAMPLE_XLS = DATA_DIR / "sample.xls"
+XLM_MACRO_XLS = DATA_DIR / "xlm_macro_sheet.xls"
+ENCRYPTED_XLS = DATA_DIR / "encrypted.xls"
