@@ -64,7 +64,10 @@ def _check_xlsx(data: bytes, max_uncompressed_ratio: int, max_uncompressed_bytes
         raise UploadRejected("malformed", "This is not a valid .xlsx file.")
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
-            names = set(z.namelist())
+            member_list = z.namelist()
+            names = set(member_list)
+            if len(member_list) != len(names):  # duplicates: which copy a reader opens is ambiguous
+                raise UploadRejected("malformed", "This .xlsx file is damaged (duplicate parts).")
             total = sum(i.file_size for i in z.infolist())
             if not {"[Content_Types].xml", "xl/workbook.xml"} <= names:
                 raise UploadRejected("malformed", "This zip file is not an Excel workbook.")

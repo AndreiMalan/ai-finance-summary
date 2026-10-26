@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import warnings
 import zipfile
 
 import pytest
@@ -194,3 +195,13 @@ def test_too_large_message_sub_megabyte():
     """Limits under 1 MB are shown with one decimal."""
     exc = _rejected("a.csv", b"a" * (512 * 1024 + 1), max_bytes=512 * 1024)
     assert exc.code == "too_large" and "0.5 MB" in exc.message
+
+
+@pytest.mark.parametrize("member", ["xl/workbook.xml", "[Content_Types].xml", "xl/worksheets/sheet1.xml"])
+def test_xlsx_duplicate_zip_members_rejected(member):
+    """Two zip entries with the same name are ambiguous (readers may pick either) → malformed."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)  # zipfile warns "Duplicate name" when writing
+        data = add_zip_member(xlsx_bytes({"S": [["a"]]}), member, b"<x/>")
+    exc = _rejected("dup.xlsx", data)
+    assert exc.code == "malformed"
