@@ -7,12 +7,12 @@ This file is updated at **every** step transition (task dispatched, implemented,
 
 ```state
 milestone: M2
-task: 2
-task_title: Upload sniffing (AC 9-11)
+task: 3
+task_title: Readers (csv/xlsx/xls/json, grid, worksheets, header to table)
 phase: implementing
 branch: m2-ingestion
-base_commit: cb4e6ef
-last_verified_commit: cb4e6ef
+base_commit: 63d6976
+last_verified_commit: 63d6976
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
 next_action: Task 1 implementer running; then review, then Tasks 2-9 in order (subagent-driven-development). After Task 9: deploy preview, set BLOB_BACKEND=vercel in Vercel (Production+Preview), live upload test, final review + QA + retro, merge.
 updated: 2026-10-26
@@ -64,6 +64,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M1-T7 Vercel entrypoint, spikes, deploy fixes | 71c71d4..ad86e83 | 9/10 |
 | M1 hardening (final review fixes) | 6cc6f90..4bd343b | 9.5/10 |
 | M2-T1 Deps + domain contracts | a0a39fa..cb4e6ef | 10/10 |
+| M2-T2 Upload sniffing | b40e7b3..63d6976 | 9/10 |
 
 ## External setup status
 
