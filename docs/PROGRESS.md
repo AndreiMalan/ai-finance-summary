@@ -7,12 +7,12 @@ This file is updated at **every** step transition (task dispatched, implemented,
 
 ```state
 milestone: M2
-task: 5
-task_title: Schema detection (AC 12)
+task: 6
+task_title: Row parsing and validation (AC 15-16)
 phase: implementing
 branch: m2-ingestion
-base_commit: 087602f
-last_verified_commit: 087602f
+base_commit: 8933e08
+last_verified_commit: 8933e08
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
 next_action: Task 1 implementer running; then review, then Tasks 2-9 in order (subagent-driven-development). After Task 9: deploy preview, set BLOB_BACKEND=vercel in Vercel (Production+Preview), live upload test, final review + QA + retro, merge.
 updated: 2026-10-26
@@ -67,6 +67,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2-T2 Upload sniffing | b40e7b3..63d6976 | 9/10 |
 | M2-T3 Readers | cbbf1e2..b3410f6 | 9/10 (after fix round from 7/10) |
 | M2-T4 Cell parsers | e65e9e9..087602f | 10/10 (after 2 fix rounds) |
+| M2-T5 Schema detection | 018c355..8933e08 | 9/10 (after fix round from 7/10) |
 
 ## External setup status
 
