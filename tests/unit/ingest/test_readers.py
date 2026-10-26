@@ -349,3 +349,43 @@ def test_xls_scan_row_cap():
     with pytest.raises(UploadRejected) as exc:
         read_grid(SAMPLE_XLS.read_bytes(), "xls", max_scan_rows=2)
     assert exc.value.code == "too_large"
+
+
+# --- Column cap -------------------------------------------------------------------------------
+
+
+def test_xlsx_value_far_right_hits_column_cap_quickly():
+    """A real value at XFD5 is rejected by max_columns before any 16,384-wide row is kept."""
+    data = edit_xlsx_sheet(xlsx_bytes({"S": [["h1", "h2"], [1, 2], [3, 4], [5, 6]]}),
+                           extra_rows_xml=b'<row r="5"><c r="XFD5" t="inlineStr"><is><t>x</t></is></c></row>')
+    start = time.perf_counter()
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(data, "xlsx", max_columns=200)
+    assert time.perf_counter() - start < 2
+    assert exc.value.code == "too_large" and "200 columns" in exc.value.message
+
+
+def test_csv_too_many_fields_hits_column_cap():
+    """A CSV row with 300 fields exceeds max_columns=200."""
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(csv_bytes([["a", "b"], [str(i) for i in range(300)]]), "csv", max_columns=200)
+    assert exc.value.code == "too_large"
+
+
+def test_column_cap_ignores_trailing_empty_cells_and_normal_files():
+    """Trailing empty cells do not count; files within the cap read normally for every kind."""
+    g = read_grid(b"a,b" + b"," * 500 + b"\n1,2\n", "csv", max_columns=2)
+    assert g.rows == [["a", "b"], ["1", "2"]]
+    assert read_grid(_TEN_ROWS, "xlsx", max_columns=3).rows[1] == [1, 2, 3]
+    assert read_grid(json.dumps([{"a": 1, "b": 2}]).encode(), "json", max_columns=2).rows[0] == ["a", "b"]
+    with pytest.raises(UploadRejected):
+        read_grid(json.dumps([{"a": 1, "b": 2, "c": 3}]).encode(), "json", max_columns=2)
+
+
+@pytest.mark.skipif(not SAMPLE_XLS.exists(), reason="tests/data/sample.xls not available")
+def test_xls_column_cap():
+    """The column cap applies to legacy .xls (sample has 3 columns)."""
+    assert len(read_grid(SAMPLE_XLS.read_bytes(), "xls", max_columns=3).rows) == 3
+    with pytest.raises(UploadRejected) as exc:
+        read_grid(SAMPLE_XLS.read_bytes(), "xls", max_columns=2)
+    assert exc.value.code == "too_large"

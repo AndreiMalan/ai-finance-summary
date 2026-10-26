@@ -92,21 +92,33 @@ def _is_empty(v: Any) -> bool:
     return v is None or (isinstance(v, str) and not v.strip())
 
 
-def _append(grid: Grid, cells: list[Any], row_number: int, max_rows: int | None,
-            max_scan_rows: int | None = None) -> None:
-    """Add a non-empty row, enforcing the row limit and the scanned-row limit.
+@dataclass(frozen=True)
+class _Limits:
+    """Caller-supplied read limits (None = unlimited); every breach raises UploadRejected("too_large")."""
+
+    max_rows: int | None = None  # non-empty rows kept
+    max_scan_rows: int | None = None  # source rows scanned, empty and gap rows included
+    max_columns: int | None = None  # position of a row's last non-empty cell
+
+
+def _append(grid: Grid, cells: list[Any], row_number: int, limits: _Limits) -> None:
+    """Add a non-empty row, enforcing the scanned-row, column and row limits.
 
     `row_number` is the 1-based position in the source, so every scanned row (including empty
-    ones) counts toward `max_scan_rows`. Trailing empty cells are trimmed.
+    ones) counts toward `max_scan_rows`. Trailing empty cells are trimmed before the column check,
+    so the cap applies to the last non-empty cell and no over-wide row is ever kept.
     """
-    if max_scan_rows is not None and row_number > max_scan_rows:
-        raise UploadRejected("too_large", f"The file has more than {max_scan_rows} rows (including empty ones).")
+    if limits.max_scan_rows is not None and row_number > limits.max_scan_rows:
+        raise UploadRejected("too_large",
+                             f"The file has more than {limits.max_scan_rows} rows (including empty ones).")
     while cells and _is_empty(cells[-1]):
         cells.pop()
     if not cells or all(_is_empty(c) for c in cells):
         return
-    if max_rows is not None and len(grid.rows) >= max_rows:
-        raise UploadRejected("too_large", f"The file has more than {max_rows} rows.")
+    if limits.max_columns is not None and len(cells) > limits.max_columns:
+        raise UploadRejected("too_large", f"The file has more than {limits.max_columns} columns.")
+    if limits.max_rows is not None and len(grid.rows) >= limits.max_rows:
+        raise UploadRejected("too_large", f"The file has more than {limits.max_rows} rows.")
     grid.rows.append(cells)
     grid.row_numbers.append(row_number)
 
@@ -155,7 +167,7 @@ def _mojibake_markers(encoding: str) -> frozenset[str]:
 _MOJIBAKE_MARKERS = {enc: _mojibake_markers(enc) for enc in _ENCODINGS[1:]}
 
 
-def _read_csv(data: bytes, max_rows: int | None, max_scan_rows: int | None) -> Grid:
+def _read_csv(data: bytes, limits: _Limits) -> Grid:
     """Decode with a fallback chain, sniff the delimiter, keep cells as strings.
 
     Upload sniffing only probes the first bytes for NULs, so any later NUL characters are removed
@@ -185,7 +197,7 @@ def _read_csv(data: bytes, max_rows: int | None, max_scan_rows: int | None) -> G
     grid = Grid(rows=[], row_numbers=[], meta=meta)
     try:
         for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=split_on), start=1):
-            _append(grid, [c if c != "" else None for c in row], i, max_rows, max_scan_rows)
+            _append(grid, [c if c != "" else None for c in row], i, limits)
     except csv.Error as exc:  # e.g. a field larger than the csv module's limit
         raise UploadRejected("malformed", "This CSV file could not be read.") from exc
     return grid
@@ -237,7 +249,7 @@ def list_worksheets(data: bytes, kind: FileKind) -> list[SheetInfo]:
     return []
 
 
-def _read_xlsx(data: bytes, worksheet: str | None, max_rows: int | None, max_scan_rows: int | None) -> Grid:
+def _read_xlsx(data: bytes, worksheet: str | None, limits: _Limits) -> Grid:
     """Cached cell values; formula cells without a cache become FORMULA_NO_VALUE.
 
     The declared <dimension> is ignored (`reset_dimensions`): it may understate the data (silent
@@ -258,7 +270,7 @@ def _read_xlsx(data: bytes, worksheet: str | None, max_rows: int | None, max_sca
             for j, v in enumerate(row):
                 r = raw_row[j] if j < len(raw_row) else None
                 cells.append(FORMULA_NO_VALUE if v is None and isinstance(r, str) and r.startswith("=") else v)
-            _append(grid, cells, i, max_rows, max_scan_rows)
+            _append(grid, cells, i, limits)
         return grid
     finally:
         values.close()
@@ -319,7 +331,7 @@ def _xls_sheet_infos(book: xlrd.book.Book) -> list[SheetInfo]:
     return [SheetInfo(s.name, bool(s.visibility)) for s in book.sheets()]
 
 
-def _read_xls(data: bytes, worksheet: str | None, max_rows: int | None, max_scan_rows: int | None) -> Grid:
+def _read_xls(data: bytes, worksheet: str | None, limits: _Limits) -> Grid:
     """Legacy Excel via xlrd; date cells converted to datetime."""
     book = _open_xls(data)
     try:
@@ -339,7 +351,7 @@ def _read_xls(data: bytes, worksheet: str | None, max_rows: int | None, max_scan
                     cells.append(None)
                 else:
                     cells.append(cell.value)
-            _append(grid, cells, r + 1, max_rows, max_scan_rows)
+            _append(grid, cells, r + 1, limits)
         return grid
     finally:
         book.release_resources()
@@ -353,7 +365,7 @@ def _reject_non_finite(text: str) -> float:
     return value
 
 
-def _read_json(data: bytes, max_rows: int | None, max_scan_rows: int | None) -> Grid:
+def _read_json(data: bytes, limits: _Limits) -> Grid:
     """List of objects (optionally wrapped) → header row + value rows.
 
     Row numbers: the header is row 1 and record k (0-based) is row k + 2. Nested values are kept
@@ -377,30 +389,32 @@ def _read_json(data: bytes, max_rows: int | None, max_scan_rows: int | None) -> 
                 seen.add(k)
                 columns.append(k)
     grid = Grid(rows=[], row_numbers=[], meta={})
-    _append(grid, list(columns), 1, max_rows, max_scan_rows)
+    _append(grid, list(columns), 1, limits)
     for i, rec in enumerate(doc, start=2):
         cells = [rec.get(c) for c in columns]
         _append(grid, [json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v for v in cells],
-                i, max_rows, max_scan_rows)
+                i, limits)
     if len(grid.rows) < 2:
         raise UploadRejected("malformed", "This JSON table has no data: every record is empty.")
     return grid
 
 
 def read_grid(data: bytes, kind: FileKind, worksheet: str | None = None, max_rows: int | None = None,
-              max_scan_rows: int | None = None) -> Grid:
+              max_scan_rows: int | None = None, max_columns: int | None = None) -> Grid:
     """Read any supported file into a grid of raw cells.
 
     `max_rows` caps non-empty rows kept; `max_scan_rows` caps source rows scanned, empty ones
-    included (both raise UploadRejected("too_large")). Limits come from the callers' settings.
+    included; `max_columns` caps the position of any row's last non-empty cell. Each raises
+    UploadRejected("too_large"). Limits come from the callers' settings.
     """
+    limits = _Limits(max_rows=max_rows, max_scan_rows=max_scan_rows, max_columns=max_columns)
     if kind == "csv":
-        return _read_csv(data, max_rows, max_scan_rows)
+        return _read_csv(data, limits)
     if kind == "xlsx":
-        return _read_xlsx(data, worksheet, max_rows, max_scan_rows)
+        return _read_xlsx(data, worksheet, limits)
     if kind == "xls":
-        return _read_xls(data, worksheet, max_rows, max_scan_rows)
-    return _read_json(data, max_rows, max_scan_rows)
+        return _read_xls(data, worksheet, limits)
+    return _read_json(data, limits)
 
 
 def _cell(row: list[Any], index: int) -> Any:
