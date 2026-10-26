@@ -1,9 +1,13 @@
-"""User-scoped repositories for reports, files, uploads, mappings, validation reports and observations.
+"""User-scoped repositories for reports, files, uploads, mappings, validation reports, observations and the
+per-report API response cache.
 
 Every read takes `user_id` and returns None/empty for other users' rows; writes to rows the user does not
 own raise PermissionError (spec AC 6). Malformed ids are treated as "not found" (never a SQL error).
 """
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
@@ -284,3 +288,45 @@ class ObservationRepo:
                              "ORDER BY indicator_code, region_code, period, obs_id",
                              (_uuid(report_id), user_id)).fetchall()
         return [Observation.model_validate(r["payload"]) for r in rows]
+
+
+@dataclass(frozen=True)
+class CachedApiResponse:
+    """One cached raw API response of a report."""
+
+    source: str
+    url: str
+    payload: Any
+    retrieved_at: datetime
+
+
+class ApiCacheRepo:
+    """Raw public-API responses cached per report (resume never re-fetches)."""
+
+    def __init__(self, pool: ConnectionPool):
+        """Bind to a pool."""
+        self.pool = pool
+
+    def get(self, user_id: str, report_id: str, request_hash: str) -> CachedApiResponse | None:
+        """The cached response of the user's report for this request, or None."""
+        rid = _uuid(report_id)
+        if rid is None:
+            return None
+        with self.pool.connection() as c:
+            row = c.execute("SELECT source, url, payload, retrieved_at FROM api_cache "
+                            "WHERE report_id = %s AND user_id = %s AND request_hash = %s",
+                            (rid, user_id, request_hash)).fetchone()
+        return CachedApiResponse(row["source"], row["url"], row["payload"], row["retrieved_at"]) if row else None
+
+    def put(self, user_id: str, report_id: str, request_hash: str, source: str, url: str, payload: Any,
+            retrieved_at: datetime) -> None:
+        """Cache a response for the user's report; an existing entry is kept (first response wins).
+
+        PermissionError unless the user owns the report.
+        """
+        with self.pool.connection() as c, c.transaction():
+            if _uuid(report_id) is None or not _owns_report(c, user_id, report_id):
+                raise PermissionError("report not owned by user")
+            c.execute("INSERT INTO api_cache (report_id, user_id, request_hash, source, url, payload, retrieved_at) "
+                      "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (report_id, request_hash) DO NOTHING",
+                      (report_id, user_id, request_hash, source, url, Jsonb(payload), retrieved_at))

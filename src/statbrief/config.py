@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     detect_header_scan_rows: int = Field(20, ge=1)  # grid rows scanned to find the header
     mapping_min_confidence: float = Field(0.8, ge=0.0, le=1.0)  # below -> user must confirm the mapping
 
+    # Public statistics APIs (M3). Base URLs must be https: their responses become report data.
+    eurostat_base_url: str = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
+    worldbank_base_url: str = "https://api.worldbank.org/v2"
+    api_timeout_s: float = Field(20.0, gt=0)  # per HTTP attempt
+    api_retries: int = Field(3, ge=0, le=10)  # extra attempts after 429/5xx/timeouts/invalid JSON
+    api_backoff_s: float = Field(1.0, ge=0)  # first retry delay; doubles on every retry
+    api_max_response_mb: int = Field(20, ge=1)  # larger responses are refused (memory guard)
+
     cron_secret: SecretStr = SecretStr("")
 
     sse_diag_ticks: int = Field(5, ge=1, le=60)
@@ -72,6 +80,14 @@ class Settings(BaseSettings):
         if len(v.get_secret_value()) < 32:
             raise ValueError("SESSION_SECRET must be at least 32 characters")
         return v
+
+    @field_validator("eurostat_base_url", "worldbank_base_url")
+    @classmethod
+    def _https_base_url(cls, v: str) -> str:
+        """Require an https:// base URL without a trailing slash."""
+        if not v.startswith("https://"):
+            raise ValueError("API base URLs must start with https://")
+        return v.rstrip("/")
 
     @model_validator(mode="after")
     def _pool_bounds_consistent(self) -> "Settings":
