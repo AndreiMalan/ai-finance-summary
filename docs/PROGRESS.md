@@ -29,6 +29,16 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 3. If it reports **new commits after `base_commit` while phase is `implementing`/`fixing`**, the implementer finished: move to `reviewing`.
 4. Never re-run a task listed as complete below; trust git + this file over conversation memory.
 
+## Parallel streams (fast mode, D-026)
+
+| Stream | Worktree | Branch | Base | Status |
+|---|---|---|---|---|
+| M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | 🔄 developer running |
+| M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | 🔄 developer running |
+| M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | 🔄 developer running |
+
+Resume rule: for each stream, check its branch log + uncommitted files in its worktree (`git -C <worktree> status`). Merge order: m2-ingestion → main, then rebase/merge m3 and m5 onto main (migrations 003/004 are distinct).
+
 ## Verified vs assumed (keep honest — the next session trusts this file)
 
 - **Verified** (by test run or command output): M1 Tasks 1–6 — full suite green at f6c861e (87 tests); Vercel env var names present (`vercel env ls`); Neon region fra1 (user-confirmed).
