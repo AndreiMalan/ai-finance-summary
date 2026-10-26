@@ -95,3 +95,4 @@ Rationale: real-world statistical workbooks often carry logos or links; rejectin
 ## D-026 — Fast mode for this project
 2026-10-26 · From M2 Task 9 onward: one developer + one reviewer (both Opus) per milestone batch, single review pass (fix Critical/Important with test evidence, re-review only for Critical or score < 6), minors deferred to the milestone's final check, independent milestones in parallel worktrees, leaner plans. Recorded in the project CLAUDE.md; the user's global pipeline is unchanged.
 Rationale: per-task review loops caught real bugs but made progress too slow and repeatedly hit the usage limit; the milestone-level final review + QA remains the quality gate.
+Amendment (2026-10-26): no Retro step for this project; milestones end with final review, QA and merge.

@@ -14,7 +14,7 @@ Overrides the global pipeline's per-task cadence for THIS project only (global ~
 - Independent milestones may run in parallel in separate git worktrees (e.g. M3 API clients ∥ M5 RAG).
 - Plans list interfaces, rules and test cases rather than full code for every function.
 - Reviews probe security and silent-wrong-value risks first; exhaustive edge-case fuzzing only where those risks exist.
-- Each milestone still ends with: final review (≥ 8/10), QA verdict, retro, merge.
+- Each milestone ends with: final review (≥ 8/10), QA verdict, merge. **No retro** for this project (user decision 2026-10-26).
 
 ## Conventions
 - Docstring on every function/class; no hardcoded tunables (use `statbrief.config.Settings`); tests need no network or API keys.
