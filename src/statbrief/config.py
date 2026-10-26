@@ -44,6 +44,20 @@ class Settings(BaseSettings):
     daily_llm_call_cap: int = Field(500, ge=1)
     max_upload_mb: int = Field(10, ge=1)
     max_files_per_report: int = Field(5, ge=1)
+    upload_chunk_mb: float = Field(4.0, gt=0, le=4.4)  # below Vercel's 4.5 MB request body limit (D-021)
+    max_uncompressed_ratio: int = Field(100, ge=2)  # zip-bomb guard for .xlsx
+    max_uncompressed_mb: int = Field(200, ge=1)  # absolute expansion cap for .xlsx
+    max_rows_per_file: int = Field(200_000, ge=1)  # non-empty rows kept per table
+    max_scan_rows_per_file: int = Field(1_000_000, ge=1)  # rows scanned incl. empty ones (gap-row DoS guard)
+    max_columns_per_file: int = Field(500, ge=1)  # widest accepted row (memory guard)
+    preview_rows: int = Field(50, ge=1, le=500)  # data rows returned by the file preview
+
+    blob_backend: Literal["local", "vercel"] = "local"  # "vercel" = private Vercel Blob store (D-021)
+    local_blob_dir: str = ".local_blobs"  # root directory of the local blob store (dev/tests)
+
+    detect_sample_rows: int = Field(200, ge=10)  # rows sampled per column for detection
+    detect_header_scan_rows: int = Field(20, ge=1)  # grid rows scanned to find the header
+    mapping_min_confidence: float = Field(0.8, ge=0.0, le=1.0)  # below -> user must confirm the mapping
 
     cron_secret: SecretStr = SecretStr("")
 
@@ -78,6 +92,13 @@ class Settings(BaseSettings):
         """Reject a non-remember session lifetime that is not shorter than the remember-me lifetime."""
         if self.session_short_max_age_hours >= self.session_max_age_days * 24:
             raise ValueError("SESSION_SHORT_MAX_AGE_HOURS must be below SESSION_MAX_AGE_DAYS * 24")
+        return self
+
+    @model_validator(mode="after")
+    def _prod_requires_vercel_blob(self) -> "Settings":
+        """Reject local-disk blob storage in prod: uploads must go to the private Vercel Blob store (D-021)."""
+        if self.app_env == "prod" and self.blob_backend != "vercel":
+            raise ValueError("BLOB_BACKEND must be 'vercel' in production")
         return self
 
     @model_validator(mode="after")

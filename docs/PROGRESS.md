@@ -6,15 +6,15 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M2
-task: 1
-task_title: Dependencies and domain contracts
+milestone: M3 ∥ M5
+task: 9
+task_title: Upload & ingestion JSON API + template download
 phase: implementing
 branch: m2-ingestion
-base_commit: BASE
-last_verified_commit: 517d707
+base_commit: 163a834
+last_verified_commit: f8264af
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: Task 1 implementer running; then review, then Tasks 2-9 in order (subagent-driven-development). After Task 9: deploy preview, set BLOB_BACKEND=vercel in Vercel (Production+Preview), live upload test, final review + QA + retro, merge.
+next_action: M2 merged. M3 and M5 developers running in worktrees (see Parallel streams). When each reports: single review (D-026), fixes, merge into main (rebase on main first), preview check.
 updated: 2026-10-26
 ```
 
@@ -28,6 +28,16 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 2. If it reports **uncommitted changes while phase is `implementing`/`fixing`**, the step was interrupted: inspect the diff, run the tests, then either finish and commit it or discard it (`git stash`) and re-dispatch the step from `base_commit`.
 3. If it reports **new commits after `base_commit` while phase is `implementing`/`fixing`**, the implementer finished: move to `reviewing`.
 4. Never re-run a task listed as complete below; trust git + this file over conversation memory.
+
+## Parallel streams (fast mode, D-026)
+
+| Stream | Worktree | Branch | Base | Status |
+|---|---|---|---|---|
+| M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
+| M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | 🔄 developer running |
+| M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | 🔄 developer running |
+
+Resume rule: for each stream, check its branch log + uncommitted files in its worktree (`git -C <worktree> status`). Merge order: m2-ingestion → main, then rebase/merge m3 and m5 onto main (migrations 003/004 are distinct).
 
 ## Verified vs assumed (keep honest — the next session trusts this file)
 
@@ -48,7 +58,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | Milestone | Status |
 |---|---|
 | M1 Skeleton, auth, limits, Vercel | ✅ 7 tasks + hardening (final review 9.5/10, QA PASS); retro docs/retros/m1.md |
-| M2 Schema + ingestion | 🔄 implementing (plan: 9 tasks) |
+| M2 Schema + ingestion | ✅ merged to main (live upload test passed on preview) |
 | M3–M9 | ⬜ not started |
 
 ## Completed tasks (append-only)
@@ -63,6 +73,15 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M1-T6 Web app, auth UI, asset build | 53319f0..f6c861e | 9/10 |
 | M1-T7 Vercel entrypoint, spikes, deploy fixes | 71c71d4..ad86e83 | 9/10 |
 | M1 hardening (final review fixes) | 6cc6f90..4bd343b | 9.5/10 |
+| M2-T1 Deps + domain contracts | a0a39fa..cb4e6ef | 10/10 |
+| M2-T2 Upload sniffing | b40e7b3..63d6976 | 9/10 |
+| M2-T3 Readers | cbbf1e2..b3410f6 | 9/10 (after fix round from 7/10) |
+| M2-T4 Cell parsers | e65e9e9..087602f | 10/10 (after 2 fix rounds) |
+| M2-T5 Schema detection | 018c355..8933e08 | 9/10 (after fix round from 7/10) |
+| M2-T6 Row parsing + validation | 85d0e8d..45054fd | 9/10 (after fix round from 7/10) |
+| M2-T7 Normalization | a51ffd2..813e6e2 | 10/10 (after 3 review cycles) |
+| M2-T8 Storage, repos, blobs | 308aea6..f8264af | 10/10 (after hardening) |
+| M2-T9 Upload API + final-review fixes | b9e3d17..44be29a | final review 7.5/10 → fixes verified by 582 tests + live Vercel upload test |
 
 ## External setup status
 
@@ -73,6 +92,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | Neon Postgres (fra1) with DATABASE_URL / DATABASE_URL_UNPOOLED | ✅ |
 | Vercel env: SESSION_SECRET, APP_ENV, DEMO_USER_EMAIL, DEMO_USER_PASSWORD | ✅ (Production; SESSION_SECRET also Preview) |
 | Vercel Blob store (private, OIDC: BLOB_STORE_ID) | ✅ Production + Preview |
+| BLOB_BACKEND=vercel (Production + Preview) | ✅ set 2026-10-26 (required by prod guard from M2-T8) |
 | Production deploy | ✅ https://ai-finance-summary.vercel.app (M1) |
 | DEMO_USER_PASSWORD ≥ 10 chars | ⬜ user to fix in Vercel |
 | OpenAI API key | ⬜ needed at M6 |

@@ -39,7 +39,8 @@ def test_short_session_secret_rejected():
 def test_cookie_secure_only_in_prod():
     """Secure cookies are enforced in prod and relaxed for local http."""
     dev = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
-    prod = Settings(database_url="postgresql://x/y", session_secret="s" * 32, app_env="prod", _env_file=None)
+    prod = Settings(database_url="postgresql://x/y", session_secret="s" * 32, app_env="prod",
+                    blob_backend="vercel", _env_file=None)
     assert dev.cookie_secure is False
     assert prod.cookie_secure is True
 
@@ -183,3 +184,41 @@ def test_get_settings_is_cached(monkeypatch):
         assert get_settings() is first and first.runs_per_hour == 10
     finally:
         get_settings.cache_clear()
+
+
+def test_detection_settings_defaults_and_validation():
+    """Schema-detection tunables default to 200 / 20 / 0.8 and are range-checked."""
+    s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
+    assert (s.detect_sample_rows, s.detect_header_scan_rows, s.mapping_min_confidence) == (200, 20, 0.8)
+    for bad in ({"detect_sample_rows": 9}, {"detect_header_scan_rows": 0},
+                {"mapping_min_confidence": 1.5}, {"mapping_min_confidence": -0.1}):
+        with pytest.raises(ValidationError):
+            Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None, **bad)
+
+
+def test_prod_requires_vercel_blob_backend():
+    """Production must store uploads in the private Vercel Blob store; local disk is dev/test only."""
+    base = {"database_url": "postgresql://x/y", "session_secret": "s" * 32, "_env_file": None}
+    with pytest.raises(ValidationError, match="BLOB_BACKEND must be 'vercel' in production"):
+        Settings(app_env="prod", **base)
+    assert Settings(app_env="prod", blob_backend="vercel", **base).blob_backend == "vercel"
+    assert Settings(app_env="dev", **base).blob_backend == "local"
+    assert Settings(app_env="test", blob_backend="vercel", **base).blob_backend == "vercel"
+
+
+def test_ingestion_limit_settings_defaults_and_validation():
+    """Upload/ingestion limits default to the agreed values; chunks stay below Vercel's 4.5 MB body (D-021)."""
+    base = {"database_url": "postgresql://x/y", "session_secret": "s" * 32, "_env_file": None}
+    s = Settings(**base)
+    assert s.upload_chunk_mb == 4.0
+    assert s.max_uncompressed_ratio == 100
+    assert s.max_uncompressed_mb == 200
+    assert s.max_rows_per_file == 200_000
+    assert s.max_scan_rows_per_file == 1_000_000
+    assert s.max_columns_per_file == 500
+    assert s.preview_rows == 50
+    for bad in ({"upload_chunk_mb": 0}, {"upload_chunk_mb": 4.5}, {"max_uncompressed_ratio": 1},
+                {"max_uncompressed_mb": 0}, {"max_rows_per_file": 0}, {"max_scan_rows_per_file": 0},
+                {"max_columns_per_file": 0}, {"preview_rows": 0}, {"preview_rows": 501}):
+        with pytest.raises(ValidationError):
+            Settings(**base, **bad)

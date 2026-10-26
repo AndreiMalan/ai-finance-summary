@@ -694,7 +694,7 @@ def validate_file_bytes(filename: str, data: bytes, max_bytes: int, max_uncompre
   - `to_table(grid: Grid, header_row: int) -> RawTable` — header is the grid row whose original row number == `header_row`; rows after it; blank header names become `column_N`; duplicates get `_2`, `_3`; fully empty rows dropped; ragged rows padded with `None`.
 
 **CSV rules:** decode `utf-8-sig` → `cp1250` → `latin-1` (first that succeeds; record `meta["encoding"]`); delimiter sniffed among `,` `;` `\t` `|` (`meta["delimiter"]`); **no** type conversion; cells beginning with `= + - @` are kept verbatim as text (never evaluated).
-**Excel rules:** `openpyxl.load_workbook(..., read_only=True, data_only=True)`; a second pass with `data_only=False` only to tell a formula (`str` starting `=`) from an empty cell → `FORMULA_NO_VALUE`; dates come back as `datetime`. `.xls` via `xlrd.open_workbook(file_contents=...)` (cached values only; date cells converted with `xlrd.xldate_as_datetime`). Default worksheet = first **visible** sheet. Unreadable content → `UploadRejected("malformed", …)`.
+**Excel rules:** `openpyxl.load_workbook(..., read_only=True, data_only=True)`; a second pass with `data_only=False` only to tell a formula (`str` starting `=`) from an empty cell → `FORMULA_NO_VALUE`; dates come back as `datetime`. `.xls` via `xlrd.open_workbook(file_contents=...)` (cached values only; date cells converted with `xlrd.xldate_as_datetime`). An xlrd "encrypted" error (FILEPASS) maps to `UploadRejected("password_protected", …)` (Task 2 review). Default worksheet = first **visible** sheet. Unreadable content → `UploadRejected("malformed", …)`.
 **JSON rules:** top-level list of objects, or an object with a `data`/`records`/`rows` list of objects; otherwise `UploadRejected("malformed", "…not a table…")`. Nested values are kept as their JSON text.
 **xls fixture:** add to `tests/fixtures.py` a committed tiny binary sample instead of generating: `tests/data/sample.xls` created once by the implementer with LibreOffice/Excel **or**, if neither is available, skip `.xls` content tests with `pytest.mark.skipif(not SAMPLE_XLS.exists(), …)` and record it in the report (xlrd reading is a thin wrapper).
 
@@ -2895,7 +2895,10 @@ class ObservationRepo:
 ```python
     upload_chunk_mb: float = Field(4.0, gt=0, le=4.4)   # below Vercel's 4.5 MB request body limit (D-021)
     max_uncompressed_ratio: int = Field(100, ge=2)      # zip-bomb guard for .xlsx
+    max_uncompressed_mb: int = Field(200, ge=1)         # absolute expansion cap for .xlsx (Task 2 review)
     max_rows_per_file: int = Field(200_000, ge=1)
+    max_scan_rows_per_file: int = Field(1_000_000, ge=1)  # rows scanned incl. empty ones (xlsx gap-row DoS guard, Task 3 review)
+    max_columns_per_file: int = Field(500, ge=1)          # widest accepted row (memory guard, Task 3 review)
     preview_rows: int = Field(50, ge=1, le=500)
 ```
 
@@ -3168,7 +3171,8 @@ def _file_or_404(rt: Runtime, user: User, file_id: str) -> DatasetRef:
 def _grid(rt: Runtime, ref: DatasetRef, worksheet: str | None):
     """Read the stored file into a grid."""
     return read_grid(rt.blobs.get(ref.blob_key), ref.kind, worksheet=worksheet,
-                     max_rows=rt.settings.max_rows_per_file)
+                     max_rows=rt.settings.max_rows_per_file, max_scan_rows=rt.settings.max_scan_rows_per_file,
+                     max_columns=rt.settings.max_columns_per_file)
 
 
 @router.post("/reports", status_code=201, dependencies=[Guard])
@@ -3228,7 +3232,8 @@ def complete_upload(upload_id: str, user: UserDep, rt: RtDep):
         return JSONResponse({"code": "malformed", "message": "The upload was incomplete."}, status_code=422)
     s = rt.settings
     try:
-        check = validate_file_bytes(up["filename"], data, s.max_upload_mb * 1024 * 1024, s.max_uncompressed_ratio)
+        check = validate_file_bytes(up["filename"], data, s.max_upload_mb * 1024 * 1024, s.max_uncompressed_ratio,
+                                    s.max_uncompressed_mb * 1024 * 1024)
         sheets = list_worksheets(data, check.kind)
     except UploadRejected as exc:
         uploads.delete(user.id, upload_id)

@@ -1,0 +1,88 @@
+code,level,name,aliases
+EU27_2020,aggregate,European Union (27),EU;EU27;European Union;Uniunea Europeana;UE
+EA20,aggregate,Euro area (20),EA;Euro area;Zona euro
+AT,country,Austria,
+BE,country,Belgium,Belgia
+BG,country,Bulgaria,
+CY,country,Cyprus,Cipru
+CZ,country,Czechia,Czech Republic;Cehia
+DE,country,Germany,Germania
+DK,country,Denmark,Danemarca
+EE,country,Estonia,
+EL,country,Greece,GR;Grecia
+ES,country,Spain,Spania
+FI,country,Finland,Finlanda
+FR,country,France,Franta
+HR,country,Croatia,Croatia
+HU,country,Hungary,Ungaria
+IE,country,Ireland,Irlanda
+IT,country,Italy,Italia
+LT,country,Lithuania,Lituania
+LU,country,Luxembourg,Luxemburg
+LV,country,Latvia,Letonia
+MT,country,Malta,
+NL,country,Netherlands,Olanda;Tarile de Jos
+PL,country,Poland,Polonia
+PT,country,Portugal,Portugalia
+RO,country,Romania,
+SE,country,Sweden,Suedia
+SI,country,Slovenia,
+SK,country,Slovakia,Slovacia
+MD,country,Moldova,Republica Moldova
+UA,country,Ukraine,Ucraina
+RS,country,Serbia,
+UK,country,United Kingdom,GB;Marea Britanie
+RO1,nuts1,Macroregiunea Unu,Macroregiunea 1
+RO2,nuts1,Macroregiunea Doi,Macroregiunea 2
+RO3,nuts1,Macroregiunea Trei,Macroregiunea 3
+RO4,nuts1,Macroregiunea Patru,Macroregiunea 4
+RO11,nuts2,Nord-Vest,Regiunea Nord-Vest
+RO12,nuts2,Centru,Regiunea Centru
+RO21,nuts2,Nord-Est,Regiunea Nord-Est
+RO22,nuts2,Sud-Est,Regiunea Sud-Est
+RO31,nuts2,Sud-Muntenia,Regiunea Sud-Muntenia
+RO32,nuts2,Bucuresti-Ilfov,Regiunea Bucuresti-Ilfov
+RO41,nuts2,Sud-Vest Oltenia,Regiunea Sud-Vest Oltenia
+RO42,nuts2,Vest,Regiunea Vest
+RO111,nuts3,Bihor,
+RO112,nuts3,Bistrita-Nasaud,
+RO113,nuts3,Cluj,
+RO114,nuts3,Maramures,
+RO115,nuts3,Satu Mare,
+RO116,nuts3,Salaj,
+RO121,nuts3,Alba,
+RO122,nuts3,Brasov,
+RO123,nuts3,Covasna,
+RO124,nuts3,Harghita,
+RO125,nuts3,Mures,
+RO126,nuts3,Sibiu,
+RO211,nuts3,Bacau,
+RO212,nuts3,Botosani,
+RO213,nuts3,Iasi,
+RO214,nuts3,Neamt,
+RO215,nuts3,Suceava,
+RO216,nuts3,Vaslui,
+RO221,nuts3,Braila,
+RO222,nuts3,Buzau,
+RO223,nuts3,Constanta,
+RO224,nuts3,Galati,
+RO225,nuts3,Tulcea,
+RO226,nuts3,Vrancea,
+RO311,nuts3,Arges,
+RO312,nuts3,Calarasi,
+RO313,nuts3,Dambovita,Dimbovita
+RO314,nuts3,Giurgiu,
+RO315,nuts3,Ialomita,
+RO316,nuts3,Prahova,
+RO317,nuts3,Teleorman,
+RO321,nuts3,Bucuresti,Bucharest;Municipiul Bucuresti
+RO322,nuts3,Ilfov,
+RO411,nuts3,Dolj,
+RO412,nuts3,Gorj,
+RO413,nuts3,Mehedinti,
+RO414,nuts3,Olt,
+RO415,nuts3,Valcea,Vilcea
+RO421,nuts3,Arad,
+RO422,nuts3,Caras-Severin,
+RO423,nuts3,Hunedoara,
+RO424,nuts3,Timis,

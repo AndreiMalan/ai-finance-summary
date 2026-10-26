@@ -87,3 +87,16 @@ Rationale: final M1 review — a cold start with the database down was unbounded
 ## D-024 — Login throttle key is the normalised email
 2026-10-26 · The per-email login throttle key is `normalize_email(raw)` (falling back to `raw.strip().lower()` for invalid input), then capped at 254 characters; the same key is recorded and echoed in the form.
 Rationale: final M1 review — truncating before normalising let whitespace-padded or re-cased variants of one address each get a fresh failure budget (AC 4 bypass).
+
+## D-025 — Embedded objects and external links in workbooks
+2026-10-26 · `.xlsx` files containing embedded OLE objects (`xl/embeddings/*`) or external workbook links (`xl/externalLinks/*`) are accepted: embedded objects are never opened and links are never followed; only cell values stored in the workbook are read (`data_only=True`). Macro-bearing content (vbaProject.bin, XLM macro sheets, dialog sheets, ActiveX, macro-enabled content types; VBA storages in `.xls`) is rejected (Task 2 review).
+Rationale: real-world statistical workbooks often carry logos or links; rejecting them would block legitimate files without improving safety, since nothing in them is executed.
+
+## D-026 — Fast mode for this project
+2026-10-26 · From M2 Task 9 onward: one developer + one reviewer (both Opus) per milestone batch, single review pass (fix Critical/Important with test evidence, re-review only for Critical or score < 6), minors deferred to the milestone's final check, independent milestones in parallel worktrees, leaner plans. Recorded in the project CLAUDE.md; the user's global pipeline is unchanged.
+Rationale: per-task review loops caught real bugs but made progress too slow and repeatedly hit the usage limit; the milestone-level final review + QA remains the quality gate.
+Amendment (2026-10-26): no Retro step for this project; milestones end with final review, QA and merge.
+
+## D-027 — Duplicate rows, "fixed" errors and the blocking pre-check
+2026-10-26 · Later occurrences of identical rows (`duplicate_row` warning) are excluded by default during normalization, whatever the warning's resolution, and are listed among the excluded rows; the first occurrence is kept. A "fixed" resolution never clears an error in normalization: only re-validation that no longer finds the error does (normalization re-validates and blocks on any fresh error not resolved "excluded"). `ValidationReport.blocking` (which treats "fixed" as clearing) is only the UI's pre-check. Saving a new column mapping deletes the file's validation report and observations.
+Rationale: M2 final review — identical rows add no information and would double-count; trusting a user's "fixed" flag on data the server can re-check would let errors through.

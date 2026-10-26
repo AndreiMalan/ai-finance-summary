@@ -360,7 +360,7 @@ Each milestone gets its own detailed plan in `docs/superpowers/plans/` and every
 1. ⬜ PDF export (reportlab): cover, summary, sections + charts, data quality, grouped citations, calculation appendix
 2. ⬜ Excel export (openpyxl, values only): Summary, Data, Metrics, Provenance, Conflicts, Citations
 3. ⬜ Dummy datasets: IRS workbook, sector CSV, JSON, cryptic-column CSV (with planted issues and conflicts)
-4. ⬜ Retention cleanup + Vercel Cron, "Delete my account"
+4. ⬜ Retention cleanup + Vercel Cron, "Delete my account" — must delete Blob objects before cascading DB deletes; purge abandoned chunked uploads
 5. ⬜ Production deployment on Vercel + Neon + Blob, environment variables, smoke test of all 8 demo scenarios
 6. ⬜ LaTeX concepts PDF (one page per concept, clickable TOC) — local only
 7. ⬜ Final whole-branch review, QA report, Retro

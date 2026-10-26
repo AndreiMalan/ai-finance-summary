@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .vercel/
 local_blobs/
+.local_blobs/
 *.aux
 *.log
 *.out
