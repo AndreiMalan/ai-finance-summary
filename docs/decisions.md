@@ -91,3 +91,7 @@ Rationale: final M1 review — truncating before normalising let whitespace-padd
 ## D-025 — Embedded objects and external links in workbooks
 2026-10-26 · `.xlsx` files containing embedded OLE objects (`xl/embeddings/*`) or external workbook links (`xl/externalLinks/*`) are accepted: embedded objects are never opened and links are never followed; only cell values stored in the workbook are read (`data_only=True`). Macro-bearing content (vbaProject.bin, XLM macro sheets, dialog sheets, ActiveX, macro-enabled content types; VBA storages in `.xls`) is rejected (Task 2 review).
 Rationale: real-world statistical workbooks often carry logos or links; rejecting them would block legitimate files without improving safety, since nothing in them is executed.
+
+## D-026 — Fast mode for this project
+2026-10-26 · From M2 Task 9 onward: one developer + one reviewer (both Opus) per milestone batch, single review pass (fix Critical/Important with test evidence, re-review only for Critical or score < 6), minors deferred to the milestone's final check, independent milestones in parallel worktrees, leaner plans. Recorded in the project CLAUDE.md; the user's global pipeline is unchanged.
+Rationale: per-task review loops caught real bugs but made progress too slow and repeatedly hit the usage limit; the milestone-level final review + QA remains the quality gate.
