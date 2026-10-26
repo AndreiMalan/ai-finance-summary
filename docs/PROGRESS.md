@@ -9,12 +9,12 @@ This file is updated at **every** step transition (task dispatched, implemented,
 milestone: M2
 task: 9
 task_title: Upload & ingestion JSON API + template download
-phase: reviewing
+phase: fixing
 branch: m2-ingestion
 base_commit: 163a834
 last_verified_commit: f8264af
 plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: Combined T9 review + M2 final whole-branch review + QA running (diff main..b9e3d17). Then developer fixes Critical/Important, preview deploy + live upload test, merge to main. Then M3 ∥ M5 in parallel worktrees.
+next_action: M2 final-review fix round running (Important 1-5 + minors 6-10). Gate = full suite + new tests (no re-review, D-026). Then preview deploy + live upload test, merge to main. M3 and M5 run in parallel worktrees (branched from m2-ingestion) — see plans 2026-10-26-m3-api-sources.md and -m5-rag.md.
 updated: 2026-10-26
 ```
 
