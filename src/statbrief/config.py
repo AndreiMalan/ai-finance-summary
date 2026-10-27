@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     detect_header_scan_rows: int = Field(20, ge=1)  # grid rows scanned to find the header
     mapping_min_confidence: float = Field(0.8, ge=0.0, le=1.0)  # below -> user must confirm the mapping
 
+    significance_rate_pp: float = Field(1.0, gt=0)  # |change| in pp that flags a rate (D-010, AC 25)
+    significance_level_pct: float = Field(2.0, gt=0)  # |% change| that flags a level (D-010, AC 25)
+    top_movers: int = Field(3, ge=0)  # largest |YoY| per indicator and period across >= 2 regions (0 = off)
+    max_revisions: int = Field(3, ge=0)  # verify -> revise cycles before safe failure (D-010, AC 27)
+    max_parse_retries: int = Field(2, ge=0)  # retries of an unparseable LLM draft (D-010)
+
     cron_secret: SecretStr = SecretStr("")
 
     sse_diag_ticks: int = Field(5, ge=1, le=60)
