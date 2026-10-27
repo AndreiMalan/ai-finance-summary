@@ -20,6 +20,7 @@ from statbrief.ingest.sniff import UploadRejected, reference_kind, validate_refe
 METADATA_KEYS = ("doc_id", "title", "issuer", "owner", "section", "page", "source_file", "source_type")
 USER_DOC_PREFIX = "user-"  # doc ids of user uploads; shared corpus ids never start with it
 USER_ISSUER = "User upload"
+PREAMBLE = "Preamble"  # section of text that precedes the first heading of a document
 _USER_DOC_HASH_CHARS = 16
 _MAX_TITLE_CHARS = 200
 _MARKDOWN_HEADERS = [("#", "h1"), ("##", "h2"), ("###", "h3"), ("####", "h4")]
@@ -95,12 +96,13 @@ def _heading(line: str, last_top: int | None) -> str | None:
 
 
 def detect_sections(text: str, carry: str | None = None) -> list[tuple[str | None, str]]:
-    """Split text at headings into (section, body) pairs; text before the first heading keeps `carry`.
+    """Split text at headings into (section, body) pairs; text before the first heading keeps `carry`
+    (PREAMBLE when there is no carried section).
 
     `carry` is the section in force at the end of the previous page, so a page that starts in the
     middle of a section is attributed to it. Heading lines stay in their body (useful for search).
     """
-    sections: list[tuple[str | None, list[str]]] = [(carry, [])]
+    sections: list[tuple[str | None, list[str]]] = [(carry or PREAMBLE, [])]
     last_top = _top_number(carry)
     for raw in text.splitlines():
         line = raw.strip()
@@ -117,7 +119,7 @@ def _markdown_sections(text: str) -> list[tuple[str | None, str]]:
     splitter = MarkdownHeaderTextSplitter(headers_to_split_on=_MARKDOWN_HEADERS, strip_headers=False)
     out = []
     for doc in splitter.split_text(text):
-        section = next((doc.metadata[k] for k in ("h4", "h3", "h2", "h1") if k in doc.metadata), None)
+        section = next((doc.metadata[k] for k in ("h4", "h3", "h2", "h1") if k in doc.metadata), PREAMBLE)
         out.append((section, doc.page_content))
     return out
 

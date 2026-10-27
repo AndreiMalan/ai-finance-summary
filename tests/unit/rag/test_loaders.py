@@ -137,3 +137,12 @@ def test_user_upload_requires_owner():
     """A user upload without an owner would become visible to everyone."""
     with pytest.raises(ValueError):
         load_user_reference(b"text", "a.txt", owner=None, max_bytes=1024, max_pages=10)
+
+
+def test_text_before_first_heading_is_preamble():
+    """Text preceding the first heading gets the section 'Preamble' (PDF, Markdown and plain text)."""
+    assert detect_sections("Intro line\n1 Scope\nBody") == [("Preamble", "Intro line"), ("1 Scope", "1 Scope\nBody")]
+    for path in (HICP, QUALITY):
+        assert load_reference(path, path.name, **SHARED)[0].metadata["section"] == "Preamble"
+    md = load_reference(b"Lead text without header\n\n## 1 Scope\nBody\n", "x.md", **SHARED)
+    assert md[0].metadata["section"] == "Preamble"
