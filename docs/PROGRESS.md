@@ -34,8 +34,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | Stream | Worktree | Branch | Base | Status |
 |---|---|---|---|---|
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
-| M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | 🔄 implemented (671 tests) — review running |
-| M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | 🔄 implemented (632 tests) — review running |
+| M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | 🔄 review 8/10 — fixes running |
+| M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | 🔄 review 9/10 — fixes running |
 | M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | main | 🔄 developer running |
 
 Resume rule: for each stream, check its branch log + uncommitted files in its worktree (`git -C <worktree> status`). Merge order: m2-ingestion → main, then rebase/merge m3 and m5 onto main (migrations 003/004 are distinct).
