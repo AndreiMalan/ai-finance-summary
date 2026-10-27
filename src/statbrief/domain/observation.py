@@ -17,6 +17,7 @@ _PERIOD_PATTERNS = {
     "Q": re.compile(r"[0-9]{4}-Q[1-4]"),
     "M": re.compile(r"[0-9]{4}-(0[1-9]|1[0-2])"),
 }
+PERIOD_PATTERNS = _PERIOD_PATTERNS  # public name for other domain modules (metric ids); do not mutate
 
 
 class UploadProvenance(BaseModel):
