@@ -20,9 +20,16 @@ from psycopg_pool import ConnectionPool
 
 from statbrief.rag.loaders import USER_DOC_PREFIX
 
-# HNSW + a WHERE filter can drop candidates (pgvector < 0.8 has no iterative scan), so the index scan
-# fetches this many times k before the owner filter and the deterministic re-sort.
-VECTOR_CANDIDATE_FACTOR = 4
+# Filtered HNSW recall: an HNSW index scan returns at most `hnsw.ef_search` candidates and the owner
+# filter is applied AFTER the scan, so other users' rows nearer the query can leave fewer than k visible
+# rows. Mitigations, in order: (1) raise ef_search to k * VECTOR_CANDIDATE_FACTOR for the transaction
+# (bounded by pgvector's 1..1000 range); (2) on pgvector >= 0.8 enable `hnsw.iterative_scan`, which keeps
+# scanning until enough rows pass the filter; (3) if still fewer than k rows come back, re-run the query
+# as an exact scan (index scans disabled for the transaction) - correct, and only paid in that case.
+VECTOR_CANDIDATE_FACTOR = 16
+HNSW_MIN_EF_SEARCH = 40  # pgvector's default
+HNSW_MAX_EF_SEARCH = 1000  # pgvector's upper bound for hnsw.ef_search
+ITERATIVE_SCAN_MIN_VERSION = (0, 8)
 CHUNK_COLUMNS = "id, doc_id, owner, issuer, title, section, page, chunk, source_file, source_type, version, text"
 _INSERT = (
     "INSERT INTO kb_chunks (doc_id, owner, issuer, title, section, page, chunk, source_file, source_type, "
@@ -41,6 +48,24 @@ SELECT * FROM (
 ORDER BY distance, doc_id, chunk, id
 LIMIT %s
 """
+
+
+def _version_tuple(version: str | None) -> tuple[int, ...]:
+    """'0.8.0' -> (0, 8, 0); unknown -> ()."""
+    try:
+        return tuple(int(part) for part in (version or "").split("."))
+    except ValueError:
+        return ()
+
+
+def _tune_hnsw_scan(conn, k: int) -> None:
+    """Transaction-local HNSW settings for a filtered top-k search (see VECTOR_CANDIDATE_FACTOR)."""
+    ef_search = min(HNSW_MAX_EF_SEARCH, max(HNSW_MIN_EF_SEARCH, k * VECTOR_CANDIDATE_FACTOR))
+    row = conn.execute("SELECT set_config('hnsw.ef_search', %s, true) AS ef, "
+                       "(SELECT extversion FROM pg_extension WHERE extname = 'vector') AS version",
+                       (str(ef_search),)).fetchone()
+    if _version_tuple(row["version"]) >= ITERATIVE_SCAN_MIN_VERSION:
+        conn.execute("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
 
 
 def parse_user_id(user_id: str | None) -> uuid.UUID | None:
@@ -168,9 +193,14 @@ class KbVectorStore(VectorStore):
     def similarity_search_by_vector_with_score(self, embedding: list[float], k: int = 4) -> list[tuple[Document, float]]:
         """Top-k visible chunks by cosine similarity (1 - distance); ties ordered by doc_id, chunk, id."""
         literal = vector_literal(embedding)
-        with self.pool.connection() as c:
-            rows = c.execute(_VECTOR_QUERY, (literal, parse_user_id(self.user_id), literal,
-                                             k * VECTOR_CANDIDATE_FACTOR, k)).fetchall()
+        params = (literal, parse_user_id(self.user_id), literal, k * VECTOR_CANDIDATE_FACTOR, k)
+        with self.pool.connection() as c, c.transaction():
+            _tune_hnsw_scan(c, k)
+            rows = c.execute(_VECTOR_QUERY, params).fetchall()
+            if len(rows) < k:  # filtered HNSW scan may have starved: exact scan (see VECTOR_CANDIDATE_FACTOR)
+                c.execute("SELECT set_config('enable_indexscan', 'off', true), "
+                          "set_config('enable_seqscan', 'on', true)")
+                rows = c.execute(_VECTOR_QUERY, params).fetchall()
         return [(row_to_document(r), 1.0 - float(r["distance"])) for r in rows]
 
     def similarity_search_with_score(self, query: str, k: int = 4, **kwargs: Any) -> list[tuple[Document, float]]:

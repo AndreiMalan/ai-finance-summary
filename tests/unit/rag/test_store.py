@@ -9,9 +9,9 @@ from langchain_core.vectorstores import VectorStore
 from statbrief.auth.users import create_user
 from statbrief.rag.corpus import index_corpus, load_corpus
 from statbrief.rag.embeddings import make_embeddings
-from statbrief.rag.loaders import load_user_reference, split_documents
+from statbrief.rag.loaders import USER_ISSUER, load_user_reference, split_documents
 from statbrief.rag.retriever import RetrievedPassage, retrieve
-from statbrief.rag.store import KbVectorStore, index_documents
+from statbrief.rag.store import _VECTOR_QUERY, KbVectorStore, index_documents, vector_literal
 from statbrief.storage.db import bootstrap, create_pool
 from tests.unit.rag.embeddings import KeywordHashEmbeddings
 
@@ -248,3 +248,100 @@ def test_index_script_runs_without_api_key(db_url, monkeypatch, capsys):
     finally:
         get_settings.cache_clear()
     assert "full-text search only" in capsys.readouterr().out
+
+
+class _FailingEmbeddings(KeywordHashEmbeddings):
+    """Embeddings whose provider is down (e.g. network error or revoked key)."""
+
+    def embed_query(self, text: str) -> list[float]:
+        """Always fail."""
+        raise RuntimeError("provider unavailable sk-secret")
+
+
+def test_embeddings_failure_falls_back_to_fts(indexed, settings, caplog):
+    """A failing embeddings call degrades to full-text search, logged without query text or key."""
+    pool, alice, _, _ = indexed
+    with caplog.at_level("WARNING", logger="statbrief.rag.retriever"):
+        hits = retrieve(pool, "NUTS 3 Cluj", alice.id, settings, embeddings=_FailingEmbeddings())
+    assert hits and {h.method for h in hits} == {"fts_fallback"} and hits[0].doc_id == "ESMB-REG-NUTS"
+    assert "RuntimeError" in caplog.text
+    assert "Cluj" not in caplog.text and "sk-secret" not in caplog.text
+
+
+def test_filtered_hnsw_scan_still_returns_k_owner_rows(ctx, settings):
+    """Hundreds of other-user rows nearer the query than the visible rows do not starve the owner."""
+    import psycopg
+
+    pool, alice, bob, emb = ctx
+    query = "regional brewing deflator"
+    near = [Document(f"{query} b{i:04d}", metadata={"doc_id": f"user-b{i:04d}", "title": "B", "issuer": USER_ISSUER,
+                                      "source_file": "b.txt"}) for i in range(300)]
+    index_documents(near, bob.id, emb, pool)
+    mine = [Document(f"{query} note number {i} with extra words", metadata={
+        "doc_id": f"user-a{i}", "title": "A", "issuer": USER_ISSUER, "source_file": "a.txt"}) for i in range(8)]
+    for doc in mine:
+        index_documents([doc], alice.id, emb, pool)
+    with pool.connection() as c:  # make the planner use the HNSW index for every new connection
+        db = c.execute("SELECT current_database() AS d").fetchone()["d"]
+        c.execute(f'ALTER DATABASE "{db}" SET enable_seqscan = off')
+        c.execute(f'ALTER DATABASE "{db}" SET enable_bitmapscan = off')
+    vec = vector_literal(emb.embed_query(query))
+    with psycopg.connect(settings.database_url) as c:
+        plan = "\n".join(r[0] for r in c.execute("EXPLAIN " + _VECTOR_QUERY, (vec, alice.id, vec, 24, 6)))
+    assert "kb_chunks_embedding_hnsw" in plan, plan  # the filtered query really scans the HNSW index
+    fresh = create_pool(settings)
+    try:
+        hits = retrieve(fresh, query, alice.id, settings, embeddings=emb, k=6)
+    finally:
+        fresh.close()
+    assert len(hits) == 6 and all(h.doc_id.startswith("user-a") and h.method == "vector" for h in hits)
+
+
+def test_vector_mode_also_finds_unembedded_own_rows(indexed, settings):
+    """Rows stored without embeddings (e.g. indexed while the provider was down) stay findable in vector mode."""
+    pool, alice, _, emb = indexed
+    _upload(pool, alice.id, None, settings)
+    hits = retrieve(pool, "zymurgy fermentation index", alice.id, settings, embeddings=emb)
+    assert hits[0].method == "vector"
+    assert any(h.doc_id.startswith("user-") and h.method == "fts" for h in hits)
+    assert len(hits) == settings.rag_top_k
+
+
+def test_fts_requires_a_positive_term(indexed, settings):
+    """Negation-only queries would match almost everything with rank 0; they return nothing."""
+    pool, alice, _, _ = indexed
+    assert retrieve(pool, "-inflation", alice.id, settings, embeddings=None) == []
+    assert retrieve(pool, "-inflation -unemployment", alice.id, settings, embeddings=None) == []
+    assert all(h.score > 0 for h in retrieve(pool, "Cluj -NUTS", alice.id, settings, embeddings=None))
+
+
+def test_k_is_clamped_to_rag_max_k(indexed, settings):
+    """A caller-supplied k never exceeds RAG_MAX_K."""
+    pool, alice, _, emb = indexed
+    capped = settings.model_copy(update={"rag_max_k": 3})
+    assert len(retrieve(pool, "HICP base year", alice.id, capped, embeddings=emb, k=1000)) == 3
+    assert len(retrieve(pool, "NUTS region", alice.id, capped, embeddings=None, k=1000)) == 3
+    assert settings.rag_max_k == 50
+
+
+def test_kb_vector_store_from_texts_and_scoped_delete(ctx):
+    """from_texts indexes into the given scope; delete() only removes rows the scope owns."""
+    pool, alice, bob, emb = ctx
+    store = KbVectorStore.from_texts(["alice zymurgy text"], emb, [{"source_file": "a.txt"}], pool=pool,
+                                     user_id=alice.id)
+    (doc,) = store.similarity_search("zymurgy", k=1)
+    assert doc.metadata["owner"] == alice.id
+    KbVectorStore(pool, emb, user_id=bob.id).delete([doc.id])
+    assert _count(pool, "owner = %s", (alice.id,)) == 1
+    KbVectorStore(pool, emb, user_id=None).delete([doc.id])  # the shared scope cannot delete owned rows
+    assert _count(pool, "owner = %s", (alice.id,)) == 1
+    store.delete([doc.id, "not-a-uuid"])
+    assert _count(pool, "owner = %s", (alice.id,)) == 0
+    with pytest.raises(ValueError):
+        KbVectorStore.from_texts(["x"], emb)
+
+
+def test_openai_embeddings_skip_tiktoken_length_check(settings):
+    """check_embedding_ctx_length=False: no tiktoken encoding download on a cold start."""
+    emb = make_embeddings(settings.model_copy(update={"openai_api_key": "sk-test"}))
+    assert emb.check_embedding_ctx_length is False
