@@ -1,8 +1,8 @@
 """World Bank Indicators API (v2) client: paged JSON → Observations with API provenance.
 
 Request: `GET {WORLDBANK_BASE_URL}/country/{ISO3;ISO3}/indicator/{id}?format=json&per_page=N[&date=Y1:Y2]`,
-following `pages` from the first page's metadata (at most WORLDBANK_MAX_PAGES); all pages are cached
-together per report. Every page is `[meta, rows]`; `[{"message": [...]}]` is an API error (SourceError).
+following `pages` from the first page's metadata (at most WORLDBANK_MAX_PAGES, all within one
+API_TOTAL_BUDGET_S time budget); all pages are cached together per report. Every page is `[meta, rows]`; `[{"message": [...]}]` is an API error (SourceError).
 
 Regions: requests take Eurostat-style codes (RO, EL, UK, EU27_2020) mapped to ISO3 via `ISO3_TO_GEO`;
 response rows map back the same way. Unmapped requested regions and unmapped response countries
@@ -23,7 +23,7 @@ from statbrief.domain.observation import ApiProvenance, Observation, make_obs_id
 from statbrief.ingest.periods import PeriodError, parse_period
 from statbrief.ingest.regions import resolve_region
 from statbrief.sources.catalog import IndicatorSpec
-from statbrief.sources.http import CacheScope, HttpPolicy, SourceError, cached_fetch, fetch_json, utc_now
+from statbrief.sources.http import Budget, CacheScope, HttpPolicy, SourceError, cached_fetch, fetch_json, utc_now
 from statbrief.sources.results import FetchResult, SeriesMeta, SkippedValue
 
 SOURCE = "worldbank"
@@ -131,9 +131,13 @@ def _check_years(since: int | None, until: int | None) -> str | None:
 
 
 def _fetch_pages(client: httpx.Client, url: str, params: list[tuple[str, str]], policy: HttpPolicy,
-                 max_pages: int, sleep: Callable[[float], None]) -> tuple[dict, str]:
-    """All pages as {"pages": [...]} plus the first page's final URL; SourceError on bad pagination."""
-    first, first_url = fetch_json(client, url, params, policy=policy, source=SOURCE, sleep=sleep)
+                 max_pages: int, sleep: Callable[[float], None], budget: Budget | None = None) -> tuple[dict, str]:
+    """All pages as {"pages": [...]} plus the first page's final URL; SourceError on bad pagination.
+
+    Every page draws on one time budget (a fresh `policy.total_budget_s` budget when none is given).
+    """
+    budget = budget or Budget(policy.total_budget_s)
+    first, first_url = fetch_json(client, url, params, policy=policy, source=SOURCE, sleep=sleep, budget=budget)
     meta, rows = _page(first)
     try:
         pages, total = int(meta.get("pages") or 1), int(meta.get("total") or 0)
@@ -143,7 +147,8 @@ def _fetch_pages(client: httpx.Client, url: str, params: list[tuple[str, str]], 
         raise SourceError(SOURCE, None, f"response has {pages} pages (limit {max_pages}); narrow the request")
     collected, count = [first], len(rows)
     for n in range(2, pages + 1):
-        page, _ = fetch_json(client, url, [*params, ("page", str(n))], policy=policy, source=SOURCE, sleep=sleep)
+        page, _ = fetch_json(client, url, [*params, ("page", str(n))], policy=policy, source=SOURCE, sleep=sleep,
+                             budget=budget)
         page_meta, page_rows = _page(page)
         if str(page_meta.get("total")) != str(meta.get("total")):
             raise SourceError(SOURCE, None, "inconsistent pagination (data changed while paging)")

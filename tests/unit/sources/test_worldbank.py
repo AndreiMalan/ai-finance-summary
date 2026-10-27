@@ -9,8 +9,9 @@ import pytest
 from statbrief.config import Settings
 from statbrief.domain.observation import make_obs_id
 from statbrief.sources.catalog import CATALOG, advanced_spec
-from statbrief.sources.http import SourceError
-from statbrief.sources.worldbank import ISO3_TO_GEO, fetch_worldbank, parse_worldbank
+from statbrief.sources.http import Budget, CacheScope, HttpPolicy, SourceError
+from statbrief.sources.worldbank import ISO3_TO_GEO, _fetch_pages, fetch_worldbank, parse_worldbank
+from statbrief.storage.repos import CachedApiResponse
 
 DATA = Path(__file__).resolve().parents[2] / "data" / "worldbank"
 T0 = datetime(2026, 10, 26, 12, tzinfo=timezone.utc)
@@ -191,3 +192,56 @@ def test_non_dict_row_raises():
     page = [{"page": 1, "pages": 1, "total": 1}, ["oops"]]
     with pytest.raises(SourceError, match="structure"):
         parse_worldbank([page], CATALOG["WB_POP"], URL, T0)
+
+
+class _MemoryCache:
+    """In-memory stand-in for ApiCacheRepo (same get/put contract)."""
+
+    def __init__(self):
+        """Empty store."""
+        self.rows = {}
+
+    def get(self, user_id, report_id, key):
+        """Stored row or None."""
+        return self.rows.get((user_id, report_id, key))
+
+    def put(self, user_id, report_id, key, source, url, payload, retrieved_at):
+        """First write wins."""
+        self.rows.setdefault((user_id, report_id, key), CachedApiResponse(source, url, payload, retrieved_at))
+
+
+def test_fetch_resumes_from_cache_without_calling_the_client():
+    """A second fetch for the same report is served from the cache: no HTTP call, same retrieved_at."""
+    seen = []
+    scope = CacheScope(_MemoryCache(), "u1", "r1")
+    s = _settings(worldbank_per_page=5)
+    first = fetch_worldbank(httpx.Client(transport=httpx.MockTransport(_serve_pages(seen))), CATALOG["WB_CPI"],
+                            ["RO", "EL"], since=2021, until=2024, settings=s, cache=scope, now=lambda: T0)
+
+    def fail(req):
+        """Any network call is a test failure."""
+        raise AssertionError("client must not be called on resume")
+
+    later = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    again = fetch_worldbank(httpx.Client(transport=httpx.MockTransport(fail)), CATALOG["WB_CPI"], ["RO", "EL"],
+                            since=2021, until=2024, settings=s, cache=scope, now=lambda: later)
+    assert len(seen) == 3 and again.observations == first.observations
+    assert again.observations[0].provenance.retrieved_at == T0
+
+
+def test_pages_share_one_time_budget():
+    """Pagination draws on one budget: once it is spent, the next page is not requested."""
+    clock = {"t": 0.0}
+    seen = []
+
+    def handler(req):
+        """Each page takes 4 s of (fake) time."""
+        seen.append(req)
+        clock["t"] += 4.0
+        return httpx.Response(200, json=_load(f"cpi_page{req.url.params.get('page', '1')}.json"))
+
+    policy = HttpPolicy(timeout_s=20.0, retries=0, backoff_s=1.0, max_bytes=100_000, total_budget_s=6.0)
+    with pytest.raises(SourceError, match="time budget"):
+        _fetch_pages(httpx.Client(transport=httpx.MockTransport(handler)), "https://api.worldbank.org/v2/x",
+                     [("format", "json")], policy, 20, lambda s: None, Budget(6.0, clock=lambda: clock["t"]))
+    assert len(seen) == 2

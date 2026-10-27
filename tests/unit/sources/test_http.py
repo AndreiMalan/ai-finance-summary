@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from statbrief.config import Settings
-from statbrief.sources.http import (CachedResponse, HttpPolicy, SourceError, cached_fetch, fetch_json,
+from statbrief.sources.http import (Budget, CachedResponse, HttpPolicy, SourceError, cached_fetch, fetch_json,
                                     request_hash)
 
 URL = "https://api.example.test/data/x"
@@ -116,13 +116,103 @@ def test_non_json_200_retried_then_reported():
 def test_redirect_followed_and_final_url_returned():
     """Eurostat answers some requests with 307 to the same resource; the final URL is the query URL."""
     def handler(req):
-        """Redirect once."""
-        if req.url.host == "api.example.test":
-            return httpx.Response(307, headers={"Location": "https://mirror.example.test/data/x?a=1"})
+        """Redirect once, on the same host."""
+        if req.url.path == "/data/x":
+            return httpx.Response(307, headers={"Location": "https://api.example.test/data/y?a=1"})
         return httpx.Response(200, json={"ok": 1})
 
     data, final_url = _fetch(_client(handler), [])
-    assert data == {"ok": 1} and final_url == "https://mirror.example.test/data/x?a=1"
+    assert data == {"ok": 1} and final_url == "https://api.example.test/data/y?a=1"
+
+
+@pytest.mark.parametrize("target", ["https://evil.example.test/data/x?a=1", "http://api.example.test/data/x?a=1"])
+def test_redirect_to_another_host_or_scheme_refused(target):
+    """Data must come from the configured API host over https: off-host redirects are errors (not retried)."""
+    calls = []
+
+    def handler(req):
+        """Redirect away from the API host."""
+        calls.append(1)
+        if str(req.url) == target:
+            return httpx.Response(200, json={"poisoned": True})
+        return httpx.Response(302, headers={"Location": target})
+
+    with pytest.raises(SourceError, match="another host"):
+        _fetch(_client(handler), [])
+    assert len(calls) == 2
+
+
+class FakeClock:
+    """Monotonic clock advanced by the recorded sleeps."""
+
+    def __init__(self):
+        """Start at 0."""
+        self.t = 0.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        """Current fake time."""
+        return self.t
+
+    def sleep(self, s: float) -> None:
+        """Record and advance."""
+        self.sleeps.append(s)
+        self.t += s
+
+
+def _budgeted(handler, clock, total_s, retries=10):
+    """fetch_json under a total time budget on the fake clock."""
+    policy = HttpPolicy(timeout_s=20.0, retries=retries, backoff_s=1.0, max_bytes=10_000, total_budget_s=total_s)
+    return fetch_json(_client(handler), URL, [], policy=policy, source="eurostat", sleep=clock.sleep,
+                      budget=Budget(total_s, clock=clock))
+
+
+def test_retry_after_is_honoured():
+    """429 with Retry-After: 7 waits 7 s instead of the backoff."""
+    codes = iter([429, 200])
+    clock = FakeClock()
+
+    def handler(req):
+        """Rate limited once."""
+        code = next(codes)
+        return httpx.Response(code, headers={"Retry-After": "7"} if code == 429 else {}, json={"ok": 1})
+
+    assert _budgeted(handler, clock, 60.0)[0] == {"ok": 1} and clock.sleeps == [7.0]
+
+
+def test_retry_after_beyond_budget_gives_up_without_sleeping():
+    """A Retry-After longer than the remaining budget ends the fetch at once."""
+    clock = FakeClock()
+    with pytest.raises(SourceError, match="time budget") as exc:
+        _budgeted(lambda r: httpx.Response(503, headers={"Retry-After": "120"}), clock, 60.0)
+    assert clock.sleeps == [] and exc.value.status == 503
+
+
+def test_total_budget_bounds_retries():
+    """Backoff 1, 2 then 4 s would exceed a 5 s budget: three attempts, then a budget error."""
+    clock, calls = FakeClock(), []
+
+    def handler(req):
+        """Always unavailable."""
+        calls.append(1)
+        return httpx.Response(503)
+
+    with pytest.raises(SourceError, match="time budget"):
+        _budgeted(handler, clock, 5.0)
+    assert clock.sleeps == [1.0, 2.0] and len(calls) == 3
+
+
+def test_attempt_timeout_capped_by_remaining_budget():
+    """The per-attempt timeout never exceeds what is left of the budget."""
+    clock, seen = FakeClock(), []
+
+    def handler(req):
+        """Record the read timeout of each request."""
+        seen.append(req.extensions["timeout"]["read"])
+        return httpx.Response(200, json={})
+
+    _budgeted(handler, clock, 3.0)
+    assert seen == [3.0]
 
 
 def test_oversized_response_rejected_without_retry():
@@ -166,6 +256,7 @@ def test_settings_defaults_for_api_sources():
     assert s.worldbank_base_url == "https://api.worldbank.org/v2"
     p = HttpPolicy.from_settings(s)
     assert p.timeout_s == 20.0 and p.max_bytes == s.api_max_response_mb * 1024 * 1024
+    assert s.api_total_budget_s == 60.0 and p.total_budget_s == 60.0
 
 
 def test_base_urls_must_be_https():
