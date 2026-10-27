@@ -46,6 +46,11 @@ class ObservationStore:
         """The observation with this id; raises KeyError when unknown."""
         return self._by_id[obs_id]
 
+    @property
+    def regions(self) -> frozenset[str]:
+        """Every region code present in the store."""
+        return frozenset(region for _, region in self._series)
+
     def series(self, indicator: str, region: str) -> list[Observation]:
         """Observations of one (indicator, region), sorted by frequency and period (empty when none)."""
         return list(self._series.get((indicator, region), ()))
