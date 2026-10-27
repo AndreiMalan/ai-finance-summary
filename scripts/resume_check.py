@@ -106,6 +106,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Windows consoles default to cp1252, which cannot print the ∥/— characters PROGRESS.md uses.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
         main()
     except Exception as exc:  # the hook must never break session start

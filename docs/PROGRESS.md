@@ -6,16 +6,16 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M3 ∥ M5
-task: 9
-task_title: Upload & ingestion JSON API + template download
-phase: implementing
-branch: m2-ingestion
-base_commit: 163a834
-last_verified_commit: f8264af
-plan: docs/superpowers/plans/2026-10-26-m2-ingestion.md
-next_action: M2 merged. M3 and M5 developers running in worktrees (see Parallel streams). When each reports: single review (D-026), fixes, merge into main (rebase on main first), preview check.
-updated: 2026-10-26
+milestone: M4 (M3, M5 merged)
+task: review-fixes
+task_title: M4 analytics + claim verifier — fixing review I1–I6
+phase: fixing
+branch: m4-analytics
+base_commit: ed3017e
+last_verified_commit: 8959ead
+plan: docs/superpowers/plans/2026-10-26-m4-analytics.md
+next_action: M5 merged into main. M4 reviewed 8/10 (review at D:/AI_Finance_summary-m4/.superpowers/sdd/m4-review.md); developer fixing I1–I6 in worktree. When done: merge m4-analytics into main, full suite, push; then start M6 (plan docs/superpowers/plans/2026-10-27-m6-llm-layer.md, worktree D:/AI_Finance_summary-m6).
+updated: 2026-10-27
 ```
 
 Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next task) … → `merging` → `done`.
@@ -35,8 +35,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 |---|---|---|---|---|
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
-| M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | 🔄 review 9/10 — fixes running |
-| M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | main | 🔄 developer running |
+| M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
+| M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | ed3017e | 🔄 review 8/10 — fixing I1–I6 |
 
 Resume rule: for each stream, check its branch log + uncommitted files in its worktree (`git -C <worktree> status`). Merge order: m2-ingestion → main, then rebase/merge m3 and m5 onto main (migrations 003/004 are distinct).
 
