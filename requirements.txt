@@ -12,3 +12,4 @@ langgraph-checkpoint-postgres==3.2.0
 openpyxl==3.1.5
 xlrd==2.0.2
 vercel-blob==0.5.0
+pandas==2.3.3
