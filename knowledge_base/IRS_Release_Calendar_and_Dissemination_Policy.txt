@@ -1,0 +1,132 @@
+INSTITUTUL ROMAN DE STATISTICA
+
+RELEASE CALENDAR AND DISSEMINATION POLICY
+
+Edition 2025.1. Approved by the President of IRS on 30 October 2024.
+Applicable to all releases from 1 January 2025.
+
+
+1. GENERAL PROVISIONS
+
+1.1 Purpose
+This document sets out the principles under which the Institutul Roman de
+Statistica (IRS) disseminates official statistics, and the release calendar
+for its principal monthly, quarterly and annual statistical releases in 2025.
+
+1.2 Principles
+IRS disseminates official statistics in accordance with the principles of
+professional independence, impartiality, objectivity and equal access. All
+users receive the same statistics at the same time. No user, including
+government bodies, receives statistics before their publication, except under
+the embargo arrangements of Section 3.
+
+
+2. RELEASE CALENDAR
+
+2.1 Advance announcement
+The release calendar for the following calendar year is published no later
+than 31 October. It states the date of each release and the reference period
+it covers. Changes to the calendar are announced at least five working days in
+advance, together with the reason for the change.
+
+2.2 Release time
+Releases are published at 09:00 Romanian time (EET in winter, EEST in summer)
+on the IRS website and the IRS open data portal simultaneously.
+
+2.3 Principal releases and timeliness
+
+  Release                                          Frequency   Published
+  -----------------------------------------------  ---------   ----------------
+  Consumer price index (national)                  monthly     t + 12 days
+  Industrial production index                      monthly     t + 40 days
+  Average net earnings                             monthly     t + 40 days
+  Regional monthly indicators (REG_LUNAR)          monthly     t + 45 days
+  Registered unemployment (county level)           monthly     t + 45 days
+  Labour force survey, quarterly results           quarterly   t + 75 days
+  GDP, flash estimate                              quarterly   t + 45 days
+  GDP, detailed estimate                           quarterly   t + 65 days
+  Regional statistical yearbook                    annual      November
+
+  "t" denotes the end of the reference period; lags are indicative and the
+  exact dates are those of the calendar. Where the date falls on a
+  public holiday or weekend, the release takes place on the next working day.
+
+2.4 Regional monthly indicators in 2025
+The REG_LUNAR dataset, described in the IRS Data Dictionary: Regional Monthly
+Indicators, is released on the following dates in 2025:
+
+  Reference month   Release date      Reference month   Release date
+  ---------------   ------------      ---------------   ------------
+  November 2024     15 January        May 2025          15 July
+  December 2024     17 February       June 2025         18 August
+  January 2025      17 March          July 2025         15 September
+  February 2025     15 April          August 2025       15 October
+  March 2025        15 May            September 2025    17 November
+  April 2025        16 June           October 2025      15 December
+
+
+3. EMBARGO
+
+3.1 Pre-release access
+Pre-release access is limited to accredited journalists under embargo, for at
+most 60 minutes before the release time, in a controlled room without external
+communication. No pre-release access is granted to government bodies.
+
+3.2 Breaches
+A breach of the embargo is published on the IRS website and leads to the
+withdrawal of accreditation.
+
+
+4. PROVISIONAL DATA AND REVISIONS
+
+4.1 Provisional data
+Data for the most recent reference month of the regional monthly indicators,
+industrial production and earnings are provisional. They are flagged "p" in
+the dissemination tables and are revised in the next monthly release.
+
+4.2 Routine revisions
+Routine revisions are made in the release following the one in which the data
+were first published. For REG_LUNAR, the values of the previous month may be
+revised; values for earlier months are revised only in the annual revision
+published with the data for March of each year.
+
+4.3 Major revisions
+Changes of base year, methodology or classification are announced at least
+three months in advance in a methodological note. The most recent major
+revision of price indices took place with the release of the data for January
+2022, when the index reference period of national price indices was changed
+to 2021=100.
+
+4.4 Corrections
+Errors are corrected as soon as they are identified. A correction notice is
+published at the top of the release page stating the series and periods
+affected and the nature of the error.
+
+
+5. DISSEMINATION FORMATS AND REUSE
+
+5.1 Formats
+Statistical releases are published as press releases in Romanian and English,
+as tables in the IRS online statistical database, and as machine-readable files (CSV and
+XLSX) on the open data portal. Machine-readable files use the decimal point;
+press releases and printed bulletins use the decimal comma.
+
+5.2 Reuse and citation
+IRS statistics may be reused free of charge for any purpose, including
+commercial purposes, provided that the source is acknowledged as "Source:
+Institutul Roman de Statistica (IRS)", together with the name of the dataset
+and the date of extraction. Users who modify or combine IRS data shall state
+that they have done so and shall not present their results as IRS statistics.
+
+5.3 Metadata
+Every dataset is published with reference metadata and, for structured files,
+a data dictionary. Users should consult the metadata before interpreting data.
+Columns or codes not defined in the metadata of a dataset have no IRS
+definition.
+
+
+6. CONTACT
+
+User support: IRS Statistical Information Service, open on working days from
+08:00 to 16:00. Requests for data not included in the release calendar are
+answered within 15 working days.

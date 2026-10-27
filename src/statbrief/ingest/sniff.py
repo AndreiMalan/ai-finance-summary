@@ -6,6 +6,7 @@ import zipfile
 import zlib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Literal
 
 from statbrief.domain.dataset import FileKind
 
@@ -30,6 +31,17 @@ _OLE_NAME_FIELD_BYTES = 64
 _OLE_MACRO_ENTRIES = {"_VBA_PROJECT_CUR", "VBA"}
 _OLE_ENCRYPTED_ENTRIES = {"ENCRYPTIONINFO", "ENCRYPTEDPACKAGE"}  # encrypted OOXML wrapped in OLE
 
+# Reference documents for the RAG knowledge base (M5): text is extracted, nothing is ever rendered or run.
+ReferenceKind = Literal["pdf", "txt", "md"]
+_REFERENCE_KIND_BY_EXT: dict[str, ReferenceKind] = {".pdf": "pdf", ".txt": "txt", ".md": "md"}
+_PDF_MAGIC = b"%PDF-"
+_PDF_EOF_MARKER = b"%%EOF"
+_PDF_EOF_TAIL_BYTES = 1024  # readers look for %%EOF in the last KB; a missing marker means truncation
+# Uncompressed name tokens of active PDF content; compressed object streams are checked structurally too.
+_PDF_ACTIVE_MARKERS = (b"/JavaScript", b"/EmbeddedFile", b"/Launch", b"/RichMedia")
+_PDF_ACTIVE_NAME_TREES = ("/JavaScript", "/EmbeddedFiles")
+_PDF_ACTIVE_ACTIONS = ("/JavaScript", "/Launch", "/ImportData", "/RichMediaExecute")
+
 
 class UploadRejected(Exception):
     """The upload is unsafe or unreadable; `code` is machine-readable, `message` user-facing."""
@@ -45,6 +57,15 @@ class FileCheck:
     """Accepted file facts."""
 
     kind: FileKind
+    size_bytes: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ReferenceCheck:
+    """Accepted reference-document facts."""
+
+    kind: ReferenceKind
     size_bytes: int
     sha256: str
 
@@ -160,3 +181,97 @@ def validate_file_bytes(filename: str, data: bytes, max_bytes: int, max_uncompre
     else:
         _check_text(data, kind)
     return FileCheck(kind=kind, size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+
+
+def _is_active_action(action) -> bool:
+    """True when a PDF action dictionary runs script, launches a program or imports data."""
+    try:
+        return action is not None and str(action.get_object().get("/S")) in _PDF_ACTIVE_ACTIONS
+    except AttributeError:  # not a dictionary (e.g. an OpenAction destination array)
+        return False
+
+
+def _pdf_has_active_content(reader) -> bool:
+    """Structural check for document-level JavaScript, embedded files and script/launch actions."""
+    root = reader.trailer["/Root"].get_object()
+    names = root.get("/Names")
+    if names is not None and any(tree in names.get_object() for tree in _PDF_ACTIVE_NAME_TREES):
+        return True
+    if _is_active_action(root.get("/OpenAction")) or "/AA" in root:
+        return True
+    for page in reader.pages:
+        if "/AA" in page:
+            return True
+        for annot in page.get("/Annots") or []:
+            annot = annot.get_object()
+            if str(annot.get("/Subtype")) in ("/FileAttachment", "/RichMedia") or _is_active_action(annot.get("/A")):
+                return True
+    return False
+
+
+def _check_pdf(data: bytes, max_pages: int) -> None:
+    """A PDF must carry the magic, parse, be unencrypted, within the page cap and free of active content.
+
+    pypdf only parses the file structure here; text is extracted later by the loader, and no script,
+    attachment or action in the file is ever executed.
+    """
+    from pypdf import PdfReader  # deferred: only reference uploads need pypdf
+
+    if not data.startswith(_PDF_MAGIC) or _PDF_EOF_MARKER not in data[-_PDF_EOF_TAIL_BYTES:]:
+        raise UploadRejected("malformed", "This is not a valid (complete) PDF file.")
+    if any(marker in data for marker in _PDF_ACTIVE_MARKERS):
+        raise UploadRejected("active_content", "PDFs containing scripts, launch actions or embedded files "
+                             "are not accepted. Print it to a plain PDF and upload it again.")
+    try:
+        reader = PdfReader(io.BytesIO(data), strict=False)
+        if reader.is_encrypted:
+            raise UploadRejected("password_protected", "This PDF is password-protected or encrypted. "
+                                 "Remove the protection and upload it again.")
+        pages = len(reader.pages)
+        active = pages <= max_pages and _pdf_has_active_content(reader)
+    except UploadRejected:
+        raise
+    except Exception as exc:  # pypdf raises many exception types on hostile input
+        raise UploadRejected("malformed", "This PDF file is damaged.") from exc
+    if pages == 0:
+        raise UploadRejected("malformed", "This PDF file has no pages.")
+    if pages > max_pages:
+        raise UploadRejected("too_many_pages", f"The PDF has more than {max_pages} pages.")
+    if active:
+        raise UploadRejected("active_content", "PDFs containing scripts, launch actions or embedded files "
+                             "are not accepted. Print it to a plain PDF and upload it again.")
+
+
+def _check_reference_text(data: bytes) -> None:
+    """.txt/.md references must be UTF-8 text (BOM allowed) without NUL bytes."""
+    if data.startswith(_UTF16_BOMS):
+        raise UploadRejected("not_text", "This file is UTF-16 encoded; save it as UTF-8 and upload again.")
+    if b"\x00" in data[:_TEXT_PROBE_BYTES]:
+        raise UploadRejected("not_text", "This file contains binary data, not text.")
+    try:
+        data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise UploadRejected("not_utf8", "This text file is not UTF-8 encoded; save it as UTF-8 and "
+                             "upload again.") from exc
+
+
+def reference_kind(filename: str) -> ReferenceKind | None:
+    """The reference-document kind implied by the file extension, or None if unsupported."""
+    return _REFERENCE_KIND_BY_EXT.get(PurePosixPath(filename.replace("\\", "/")).suffix.lower())
+
+
+def validate_reference_bytes(filename: str, data: bytes, max_bytes: int, max_pages: int) -> ReferenceCheck:
+    """Validate a reference-document upload (.pdf/.txt/.md); return its kind and hash or raise UploadRejected."""
+    kind = reference_kind(filename)
+    if kind is None:
+        raise UploadRejected("unsupported_extension", "Only PDF, plain text (.txt) and Markdown (.md) "
+                             "reference documents are accepted.")
+    if not data:
+        raise UploadRejected("empty", "The file is empty.")
+    if len(data) > max_bytes:
+        raise UploadRejected("too_large", _too_large_message(max_bytes))
+    if kind == "pdf":
+        _check_pdf(data, max_pages)
+    else:
+        _check_reference_text(data)
+    return ReferenceCheck(kind=kind, size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest())

@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Upper bound (seconds) for one /_diag/sse stream: below Vercel's 300 s function maxDuration
 # (Hobby maximum, vercel.json) with a 10 s margin for cold start and response overhead.
 SSE_DIAG_MAX_TOTAL_S = 290.0
+# pgvector's HNSW index supports at most 2000 dimensions for the `vector` type.
+PGVECTOR_HNSW_MAX_DIMENSIONS = 2000
 
 
 class Settings(BaseSettings):
@@ -70,6 +72,17 @@ class Settings(BaseSettings):
     worldbank_per_page: int = Field(1000, ge=1, le=20000)  # rows per World Bank page
     worldbank_max_pages: int = Field(20, ge=1)  # more pages than this → error (no unbounded pagination)
     conflict_rel_tol: float = Field(0.005, ge=0.0, le=0.5)  # D-010: relative tolerance before rounding units
+    enable_vector_search: bool = True  # D-011 toggle; False (or no embeddings) -> Postgres full-text search
+    embeddings_provider: Literal["openai"] = "openai"
+    embeddings_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = Field(1536, ge=1, le=PGVECTOR_HNSW_MAX_DIMENSIONS)  # must match kb_chunks
+    openai_api_key: SecretStr | None = None
+    rag_top_k: int = Field(6, ge=1, le=50)  # passages returned per retrieval (default k)
+    rag_max_k: int = Field(50, ge=1, le=200)  # upper bound for any caller-supplied k
+    rag_chunk_size: int = Field(1200, ge=100)  # characters per chunk (RecursiveCharacterTextSplitter)
+    rag_chunk_overlap: int = Field(150, ge=0)  # characters shared by consecutive chunks
+    max_reference_mb: int = Field(10, ge=1)  # size cap for user-uploaded reference documents
+    max_reference_pages: int = Field(300, ge=1)  # PDF page cap (bounds text-extraction work)
 
     cron_secret: SecretStr = SecretStr("")
 
@@ -112,6 +125,20 @@ class Settings(BaseSettings):
         """Reject a non-remember session lifetime that is not shorter than the remember-me lifetime."""
         if self.session_short_max_age_hours >= self.session_max_age_days * 24:
             raise ValueError("SESSION_SHORT_MAX_AGE_HOURS must be below SESSION_MAX_AGE_DAYS * 24")
+        return self
+
+    @model_validator(mode="after")
+    def _top_k_within_max_k(self) -> "Settings":
+        """Reject a default k above the k cap."""
+        if self.rag_top_k > self.rag_max_k:
+            raise ValueError("RAG_TOP_K must not exceed RAG_MAX_K")
+        return self
+
+    @model_validator(mode="after")
+    def _chunk_overlap_below_size(self) -> "Settings":
+        """Reject a chunk overlap that is not smaller than the chunk size (the splitter would not advance)."""
+        if self.rag_chunk_overlap >= self.rag_chunk_size:
+            raise ValueError("RAG_CHUNK_OVERLAP must be below RAG_CHUNK_SIZE")
         return self
 
     @model_validator(mode="after")

@@ -3,3 +3,4 @@ uvicorn==0.54.0
 pytest==9.1.1
 pytest-asyncio==1.4.1
 pgserver==0.1.4
+reportlab==5.1.0

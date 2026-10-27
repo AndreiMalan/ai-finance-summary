@@ -1,0 +1,99 @@
+{
+  "description": "StatBrief reference corpus. Issuers are the European Statistical Methods Board (ESMB) and the Institutul Roman de Statistica (IRS). PDFs are generated from knowledge_base/src/*.md by scripts/build_knowledge_base.py.",
+  "documents": [
+    {
+      "doc_id": "ESMB-REG-2023-14",
+      "title": "ESMB Regulation 2023/14 on Harmonised Price Statistics",
+      "issuer": "ESMB",
+      "issuer_name": "European Statistical Methods Board",
+      "format": "pdf",
+      "version": "1.0",
+      "published": "2023-09-28",
+      "file": "ESMB_Regulation_2023-14_Harmonised_Price_Statistics.pdf",
+      "source": "src/ESMB_Regulation_2023-14_Harmonised_Price_Statistics.md"
+    },
+    {
+      "doc_id": "ESMB-MAN-LFS",
+      "title": "ESMB Methodological Manual on Labour Force and Unemployment Statistics",
+      "issuer": "ESMB",
+      "issuer_name": "European Statistical Methods Board",
+      "format": "pdf",
+      "version": "2.1",
+      "published": "2024-03-12",
+      "file": "ESMB_Manual_Labour_Force_and_Unemployment.pdf",
+      "source": "src/ESMB_Manual_Labour_Force_and_Unemployment.md"
+    },
+    {
+      "doc_id": "ESMB-GUIDE-NA-VOL",
+      "title": "ESMB Guide to Volume Measures in National Accounts",
+      "issuer": "ESMB",
+      "issuer_name": "European Statistical Methods Board",
+      "format": "pdf",
+      "version": "1.2",
+      "published": "2022-11-04",
+      "file": "ESMB_Guide_National_Accounts_Volume_Measures.pdf",
+      "source": "src/ESMB_Guide_National_Accounts_Volume_Measures.md"
+    },
+    {
+      "doc_id": "ESMB-REG-NUTS",
+      "title": "ESMB Regulation on the Territorial Classification of Statistical Units (NUTS)",
+      "issuer": "ESMB",
+      "issuer_name": "European Statistical Methods Board",
+      "format": "md",
+      "version": "NUTS 2021, consolidated 1.3",
+      "published": "2021-01-01",
+      "file": "ESMB_Regulation_Territorial_Classification_NUTS.md"
+    },
+    {
+      "doc_id": "ESMB-POL-QUALITY",
+      "title": "ESMB Data Quality and Revisions Policy",
+      "issuer": "ESMB",
+      "issuer_name": "European Statistical Methods Board",
+      "format": "txt",
+      "version": "3.0",
+      "published": "2024-06-20",
+      "file": "ESMB_Data_Quality_and_Revisions_Policy.txt"
+    },
+    {
+      "doc_id": "IRS-DD-REG-MONTHLY",
+      "title": "IRS Data Dictionary: Regional Monthly Indicators (REG_LUNAR)",
+      "issuer": "IRS",
+      "issuer_name": "Institutul Roman de Statistica",
+      "format": "pdf",
+      "version": "4.2",
+      "published": "2025-02-17",
+      "file": "IRS_Data_Dictionary_Regional_Monthly_Indicators.pdf",
+      "source": "src/IRS_Data_Dictionary_Regional_Monthly_Indicators.md"
+    },
+    {
+      "doc_id": "IRS-TN-EUR-DIFF",
+      "title": "IRS Technical Note: Differences between IRS Regional Series and European Harmonised Series",
+      "issuer": "IRS",
+      "issuer_name": "Institutul Roman de Statistica",
+      "format": "md",
+      "version": "1.1",
+      "published": "2025-05-08",
+      "file": "IRS_Technical_Note_Differences_vs_European_Series.md"
+    },
+    {
+      "doc_id": "IRS-CAL-DISSEM",
+      "title": "IRS Release Calendar and Dissemination Policy",
+      "issuer": "IRS",
+      "issuer_name": "Institutul Roman de Statistica",
+      "format": "txt",
+      "version": "2025.1",
+      "published": "2024-10-30",
+      "file": "IRS_Release_Calendar_and_Dissemination_Policy.txt"
+    },
+    {
+      "doc_id": "ESMB-GUIDE-COMMENTARY",
+      "title": "ESMB Guidelines for Statistical Commentary",
+      "issuer": "ESMB",
+      "issuer_name": "European Statistical Methods Board",
+      "format": "md",
+      "version": "1.0",
+      "published": "2023-04-03",
+      "file": "ESMB_Guidelines_Statistical_Commentary.md"
+    }
+  ]
+}
