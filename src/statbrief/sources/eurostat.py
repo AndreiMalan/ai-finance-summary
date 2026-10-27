@@ -5,6 +5,8 @@ Request: `GET {EUROSTAT_BASE_URL}/{dataset}?format=JSON&lang=EN&<filters>&geo=..
 `lastTimePeriod=n` (parameter names verified against the live API on 2026-10-26).
 
 Parsing rules (nothing is invented or silently dropped):
+- A size-0 dimension other than `time` (e.g. an unknown filter value) → SourceError "no data for filter k=v";
+  only an empty `time` dimension is a valid empty result.
 - Every dimension other than `geo` and `time` must have exactly one category, and each filter must be a
   dimension whose returned category equals the filter value; otherwise SourceError (several series
   would be merged, or a filter was ignored).
@@ -145,8 +147,13 @@ def parse_jsonstat(payload: Any, spec: IndicatorSpec, query_url: str, retrieved_
                       payload.get("updated"))
     result = FetchResult(meta=meta)
     result.skipped += [SkippedValue(g, None, "missing_value") for g in requested_geos if g not in cats["geo"]]
-    if 0 in sizes:
-        return result
+    empty = [d for d, n in zip(ids, sizes, strict=True) if n == 0]
+    if empty and empty != ["time"]:
+        dim = next(d for d in empty if d != "time")
+        what = f"filter {dim}={spec.filters[dim]}" if dim in spec.filters else f"dimension {dim!r}"
+        raise SourceError(SOURCE, None, f"no data for {what}")
+    if empty:
+        return result  # only the time range is empty: a valid, empty selection
     _check_series(spec, cats)
     freq = _frequency(spec, cats)
     unit = _unit(spec, cats)

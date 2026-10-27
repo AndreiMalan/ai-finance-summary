@@ -249,3 +249,30 @@ def test_non_finite_values_are_missing():
     """NaN/Infinity (accepted by Python's JSON parser) are skipped, never stored."""
     r = parse_jsonstat(_tiny({"0": float("nan"), "1": float("inf")}), ADV, URL, T0)
     assert r.observations == [] and [s.reason for s in r.skipped] == ["missing_value", "missing_value"]
+
+
+def test_empty_filter_dimension_raises_no_data():
+    """A filter value unknown to the dataset (size-0 dimension) is an error, not an empty series."""
+    payload = _tiny({}, unit=())
+    with pytest.raises(SourceError, match="no data for filter unit=PC"):
+        parse_jsonstat(payload, ADV, URL, T0, requested_geos=["RO"])
+    no_geo = _tiny({})
+    no_geo["size"][no_geo["id"].index("geo")] = 0
+    no_geo["dimension"]["geo"]["category"] = {"index": {}, "label": {}}
+    with pytest.raises(SourceError, match="no data"):
+        parse_jsonstat(no_geo, ADV, URL, T0)
+
+
+def test_non_standard_axis_order_and_sparse_status():
+    """Axis order time, unit, geo with out-of-order category indices maps every cell to the right key."""
+    cube = {"version": "2.0", "class": "dataset", "id": ["time", "unit", "geo"], "size": [3, 1, 2],
+            "dimension": {"time": {"category": {"index": {"2024-03": 2, "2024-01": 0, "2024-02": 1}}},
+                          "unit": {"category": {"index": {"PC": 0}}},
+                          "geo": {"category": {"index": {"RO": 0, "HU": 1}}}},
+            "value": {"0": 10, "1": 20, "2": 11, "4": 12, "5": 22}, "status": {"3": "c", "5": "p"}}
+    r = parse_jsonstat(cube, ADV, URL, T0, requested_geos=["RO", "HU", "DE"])
+    assert sorted((o.region_code, o.period, o.value, o.status_flag) for o in r.observations) == [
+        ("HU", "2024-01", 20.0, None), ("HU", "2024-03", 22.0, "p"),
+        ("RO", "2024-01", 10.0, None), ("RO", "2024-02", 11.0, None), ("RO", "2024-03", 12.0, None)]
+    assert sorted((s.region, s.period, s.reason, s.status_flag) for s in r.skipped) == [
+        ("DE", None, "missing_value", None), ("HU", "2024-02", "missing_value", "c")]
