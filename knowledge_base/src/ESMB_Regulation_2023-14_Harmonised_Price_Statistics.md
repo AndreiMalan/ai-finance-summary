@@ -122,9 +122,9 @@ For the purposes of this Regulation, the following definitions apply:
 
 ### Article 12 Change of the index reference period
 
-(1) The index reference period shall be changed to 2025=100 with the release of the index for January 2026. From that release, complete back series shall be transmitted on the new base.
+(1) The Board may decide a future change of the index reference period by an amending regulation, which shall fix the new reference period and the first index released on it, and shall require complete back series on the new base. Until such a change takes effect, 2015=100 applies.
 
-(2) Until then, MSAs shall not transmit HICPs on any base other than 2015=100.
+(2) MSAs shall not transmit HICPs on any base other than 2015=100.
 
 ### Article 13 Entry into force
 

@@ -121,3 +121,26 @@ def test_committed_pdfs_match_their_markdown_sources(tmp_path):
     assert sorted(p.name for p in built) == sorted(e["file"] for e in pdfs)
     for e in pdfs:
         assert (tmp_path / e["file"]).read_bytes() == (KB / e["file"]).read_bytes(), e["file"]
+
+
+@pytest.mark.parametrize("doc_id", [e["doc_id"] for e in _manifest()])
+def test_hicp_base_is_consistently_2015(doc_id):
+    """No document states an HICP base other than 2015=100 (the planned 2021=100 vs 2015=100 conflict)."""
+    text = _text(_by_id(doc_id)).replace("\n", " ")
+    bases = set(re.findall(r"\b(\d{4})=100\b", text))
+    assert bases <= {"2015", "2021"}, bases
+    assert not re.search(r"HICP[^.]{0,80}\b2021=100", text.replace("CPI, 2021=100", "")), doc_id
+
+
+def test_hicp_regulation_change_of_base_is_undated():
+    """Article 12 leaves a future change of the index reference period undated; 2015=100 applies until then."""
+    src = (KB / _by_id("ESMB-REG-2023-14")["source"]).read_text(encoding="utf-8")
+    article = src.split("### Article 12", 1)[1].split("\n### ", 1)[0]
+    assert "2015=100" in article and not re.search(r"\b20\d\d=100", article.replace("2015=100", ""))
+    assert not re.search(r"(January|February|March) 20\d\d", article)
+
+
+def test_technical_note_states_relative_base_gap():
+    """IRS TN 3.2 quantifies the base-year gap relative to the 2021=100 level (118.30 / 100 -> about 18 %)."""
+    text = (KB / _by_id("IRS-TN-EUR-DIFF")["file"]).read_text(encoding="utf-8")
+    assert "about 18 % relative to the 2021=100 level" in text
