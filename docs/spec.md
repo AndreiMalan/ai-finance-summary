@@ -23,7 +23,7 @@ A public, login-protected web app on Vercel that lets a user combine uploaded CS
 
 ### B. Data sources & upload
 7. User chooses source mode: **API only**, **Uploaded files only**, or **Combined**.
-8. API mode supports the curated catalogue (Eurostat `prc_hicp_manr`, `une_rt_m`, `namq_10_gdp`, `sts_inpr_m`, `nama_10r_2gdp`; World Bank `NY.GDP.MKTP.KD.ZG`, `FP.CPI.TOTL.ZG`, `SP.POP.TOTL`) plus an "Advanced" free-entry dataset/indicator code marked *uncurated*.
+8. API mode supports the curated catalogue (Eurostat `prc_hicp_minr` — replaces the discontinued `prc_hicp_manr`, D-028 —, `une_rt_m`, `namq_10_gdp`, `sts_inpr_m`, `nama_10r_2gdp`; World Bank `NY.GDP.MKTP.KD.ZG`, `FP.CPI.TOTL.ZG`, `SP.POP.TOTL`) plus an "Advanced" free-entry dataset/indicator code marked *uncurated*.
 9. Upload area accepts one or more `.csv`, `.xlsx`, `.xls`, `.json` files via drag-and-drop or picker; limits `MAX_UPLOAD_MB` (10) and `MAX_FILES_PER_REPORT` (5).
 10. Files are validated by extension **and** content sniffing (magic bytes / parse attempt); `.xlsm`, macro-bearing or malformed files are rejected with a specific reason.
 11. Macros, formulas, scripts are never executed: Excel read with `data_only=True` (cached values); a formula cell without a cached value is reported as an issue, not computed. CSV cells starting with `= + - @` are treated as text, and are escaped on Excel export.
