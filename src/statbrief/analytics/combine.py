@@ -6,8 +6,9 @@ Rules (spec AC 20-22, D-010):
 - Join key: (indicator, region, period); values are compared only within the same (unit, unit_multiplier)
   and only across different sources (an uploaded file, or an API series). Different units for one key are
   reported as `UnitMismatch`, never converted. Missing values (None) never conflict.
-- Two values conflict when |a - b| > max(rel_tol · max(|a|, |b|), rounding unit of the coarser value); the
-  rounding unit is the last written decimal place (3.3 → 0.1, 3.27 → 0.01, whole numbers → 1). With
+- Two values conflict when |a - b| > max(rel_tol · max(|a|, |b|), rounding unit); the rounding unit is the
+  last written decimal place (3.3 → 0.1, 3.27 → 0.01) of the coarser non-integral value, and 1 only when
+  both values are whole numbers (a float such as 5.0 says nothing about precision: 5.0 vs 5.9 conflicts). With
   `ignore_rounding=False` only the relative tolerance applies. Arithmetic uses decimals of the shortest
   float representation, so 3.3 vs 3.2 is exactly one unit (not a conflict).
 - Every conflict must be resolved before drafting (`UnresolvedConflicts`).
@@ -77,7 +78,8 @@ def _conflicting(a: float, b: float, rel_tol: float, ignore_rounding: bool) -> b
     da, db = _dec(a), _dec(b)
     tol = Decimal(repr(rel_tol)) * max(abs(da), abs(db))
     if ignore_rounding:
-        tol = max(tol, rounding_unit(a), rounding_unit(b))
+        decimals = [rounding_unit(v) for v in (a, b) if not float(v).is_integer()]
+        tol = max(tol, max(decimals) if decimals else Decimal(1))
     return abs(da - db) > tol
 
 

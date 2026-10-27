@@ -215,3 +215,13 @@ def test_gap_fill_includes_none_valued_endpoints_but_never_extends_the_span():
     api = [_api("2024-01", 6.0), _api("2024-02", 6.1), _api("2024-04", 6.4)]
     filled, report = fill_gaps(up, api, [LINK], consent=True)
     assert [o.period for o in filled] == ["2024-02"] and report.filled[0].replaced_obs_id == up[0].obs_id
+
+
+@pytest.mark.parametrize("a,b,conflict", [
+    (5.0, 5.9, True), (0.0, 0.9, True), (3.27, 3.3, False), (6.0, 6.0, False), (6.0, 7.0, False), (6.0, 8.0, True),
+    (100.0, 100.4, False), (2.0, 2.95, True),
+])
+def test_integral_rounding_unit_only_when_both_values_integral(a, b, conflict):
+    """A whole number written as 5.0 does not widen the tolerance to 1 against a decimal value."""
+    obs = [_up("2024-03", a, code="X"), _api("2024-03", b, code="X")]
+    assert bool(detect_conflicts(obs, rel_tol=TOL).conflicts) is conflict
