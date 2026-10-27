@@ -8,7 +8,7 @@ from statbrief.analytics.combine import (apply_resolutions, combine, detect_conf
                                          rounding_unit)
 from statbrief.config import Settings
 from statbrief.domain.conflict import ConflictResolution, IndicatorLink, UnresolvedConflicts
-from statbrief.domain.observation import ApiProvenance, Observation, UploadProvenance
+from statbrief.domain.observation import ApiProvenance, Observation, UploadProvenance, make_obs_id
 
 T0 = datetime(2026, 10, 26, tzinfo=timezone.utc)
 TOL = 0.005
@@ -138,8 +138,10 @@ def _conflict_setup():
 def test_prefer_keeps_chosen_source():
     """'prefer' keeps the preferred candidate and excludes the others with a reason."""
     obs, [c], up, api, other = _conflict_setup()
-    kept, excluded = apply_resolutions(obs, [c], [ConflictResolution(conflict_id=c.conflict_id, choice="prefer",
-                                                                      preferred_obs_id=api.obs_id)])
+    res = apply_resolutions(obs, [c], [ConflictResolution(conflict_id=c.conflict_id, choice="prefer",
+                                                          preferred_obs_id=api.obs_id)])
+    kept, excluded = res.kept, res.excluded
+    assert res.labels == {}
     assert {o.obs_id for o in kept} == {api.obs_id, other.obs_id}
     assert [e.obs_id for e in excluded] == [up.obs_id] and c.conflict_id in excluded[0].reason
 
@@ -147,9 +149,12 @@ def test_prefer_keeps_chosen_source():
 def test_keep_both_and_exclude():
     """'keep_both' keeps every candidate; 'exclude' drops them all with reasons."""
     obs, [c], up, api, other = _conflict_setup()
-    kept, excluded = apply_resolutions(obs, [c], [ConflictResolution(conflict_id=c.conflict_id, choice="keep_both")])
-    assert len(kept) == 3 and excluded == []
-    kept, excluded = apply_resolutions(obs, [c], [ConflictResolution(conflict_id=c.conflict_id, choice="exclude")])
+    res = apply_resolutions(obs, [c], [ConflictResolution(conflict_id=c.conflict_id, choice="keep_both")])
+    assert len(res.kept) == 3 and res.excluded == []
+    assert res.labels == {up.obs_id: "Upload: irs.xlsx",
+                          api.obs_id: "Eurostat: prc_hicp_minr?coicop18=TOTAL&unit=RCH_A"}
+    res = apply_resolutions(obs, [c], [ConflictResolution(conflict_id=c.conflict_id, choice="exclude")])
+    kept, excluded = res.kept, res.excluded
     assert [o.obs_id for o in kept] == [other.obs_id] and {e.obs_id for e in excluded} == {up.obs_id, api.obs_id}
 
 
@@ -194,9 +199,12 @@ def test_gap_fill_with_consent_keeps_api_provenance():
     filled, report = fill_gaps(up, api, [LINK], consent=True)
     assert [(o.period, o.value) for o in filled] == [("2024-02", 6.1), ("2024-03", 6.3)]
     assert all(isinstance(o.provenance, ApiProvenance) for o in filled)
-    assert all(o.indicator_code == "inflatie" for o in filled)
-    assert [(f.period, f.obs_id, f.replaced_obs_id) for f in report.filled] == [
-        ("2024-02", api[0].obs_id, None), ("2024-03", api[1].obs_id, up[1].obs_id)]
+    assert all(o.indicator_code == "HICP_YOY" for o in filled)  # same naming space as combine()
+    assert [o.obs_id for o in filled] == [make_obs_id("gapfill", api[0].obs_id, "inflatie"),
+                                          make_obs_id("gapfill", api[1].obs_id, "inflatie")]
+    assert [(f.period, f.obs_id, f.source_obs_id, f.replaced_obs_id) for f in report.filled] == [
+        ("2024-02", filled[0].obs_id, api[0].obs_id, None), ("2024-03", filled[1].obs_id, api[1].obs_id, up[1].obs_id)]
+    assert report.filled[0].indicator == "HICP_YOY" and report.filled[0].upload_indicator == "inflatie"
     assert report.filled[0].api_name == "eurostat" and report.consent is True
 
 
@@ -225,3 +233,14 @@ def test_integral_rounding_unit_only_when_both_values_integral(a, b, conflict):
     """A whole number written as 5.0 does not widen the tolerance to 1 against a decimal value."""
     obs = [_up("2024-03", a, code="X"), _api("2024-03", b, code="X")]
     assert bool(detect_conflicts(obs, rel_tol=TOL).conflicts) is conflict
+
+
+def test_combined_and_filled_obs_ids_are_unique():
+    """combine() + fill_gaps() output can be stored together: no obs_id collides with the API point it copies."""
+    up = [_up("2024-01", 6.0), _up("2024-03", 6.6)]
+    api = [_api("2024-01", 6.0), _api("2024-02", 6.1), _api("2024-03", 6.6)]
+    combined = combine(up, api, [LINK])
+    filled, _ = fill_gaps(up, api, [LINK], consent=True)
+    ids = [o.obs_id for o in combined + filled]
+    assert len(filled) == 1 and len(ids) == len(set(ids))
+    assert {o.indicator_code for o in combined + filled} == {"HICP_YOY"}

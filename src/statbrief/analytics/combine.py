@@ -14,8 +14,10 @@ Rules (spec AC 20-22, D-010):
 - Every conflict must be resolved before drafting (`UnresolvedConflicts`).
 - Gap filling only with consent: for each linked uploaded series (indicator, region, frequency), periods
   from its first to its last uploaded period (inclusive) that are absent or None-valued are filled from the linked API
-  series when units match (else reported `unit_mismatch`). Filled points keep their API provenance and obs
-  id and take the uploaded indicator code.
+  series when units match (else reported `unit_mismatch`). Filled points are in the naming space of
+  `combine` (catalog indicator code), keep their API provenance, and get their own obs id
+  `make_obs_id("gapfill", api obs_id, upload code)` so they never collide with the API point itself.
+  A filled point replaces the uploaded point with a missing value (`replaced_obs_id`): callers drop that one.
 """
 import hashlib
 from collections import defaultdict
@@ -24,9 +26,11 @@ from decimal import Decimal
 from itertools import combinations
 
 from statbrief.domain.conflict import (Conflict, ConflictResolution, ConflictScan, ExcludedObservation,
-                                       FilledPoint, GapFillReport, GapNotFilled, IndicatorLink, UnitMismatch,
-                                       UnresolvedConflicts)
-from statbrief.domain.observation import ApiProvenance, Observation
+                                       FilledPoint, GapFillReport, GapNotFilled, IndicatorLink, ResolutionResult,
+                                       UnitMismatch, UnresolvedConflicts)
+from statbrief.domain.observation import ApiProvenance, Observation, make_obs_id
+
+_API_LABELS = {"eurostat": "Eurostat", "worldbank": "World Bank"}
 
 
 def _link_map(links: Iterable[IndicatorLink]) -> dict[str, str]:
@@ -49,6 +53,14 @@ def source_key(obs: Observation) -> str:
     if isinstance(p, ApiProvenance):
         return f"api:{p.api_name}:{p.series_id}"
     return f"upload:{p.file_id}"
+
+
+def source_label(obs: Observation) -> str:
+    """Human-readable source of an observation: "Upload: <file>" or "<API>: <series id>"."""
+    p = obs.provenance
+    if isinstance(p, ApiProvenance):
+        return f"{_API_LABELS.get(p.api_name, p.api_name)}: {p.series_id}"
+    return f"Upload: {p.filename}"
 
 
 def combine(upload_obs: Sequence[Observation], api_obs: Sequence[Observation],
@@ -129,8 +141,9 @@ def detect_conflicts(obs: Sequence[Observation], *, rel_tol: float, ignore_round
 
 
 def apply_resolutions(obs: Sequence[Observation], conflicts: Sequence[Conflict],
-                      resolutions: Sequence[ConflictResolution]) -> tuple[list[Observation], list[ExcludedObservation]]:
-    """Apply the user's resolutions: (kept observations in input order, excluded ones with reasons).
+                      resolutions: Sequence[ConflictResolution]) -> ResolutionResult:
+    """Apply the user's resolutions: kept observations (input order), excluded ones with reasons, and source
+    labels for the candidates kept under "keep_both".
 
     UnresolvedConflicts when a conflict has no resolution; ValueError for resolutions of unknown
     conflicts, duplicate resolutions, or a preferred obs id that is not a candidate.
@@ -147,9 +160,12 @@ def apply_resolutions(obs: Sequence[Observation], conflicts: Sequence[Conflict],
     if unresolved:
         raise UnresolvedConflicts(unresolved)
     excluded: dict[str, str] = {}
+    keep_both: set[str] = set()
     for cid, r in chosen.items():
         candidates = by_id[cid].candidates
-        if r.choice == "prefer":
+        if r.choice == "keep_both":
+            keep_both.update(candidates)
+        elif r.choice == "prefer":
             if r.preferred_obs_id not in candidates:
                 raise ValueError(f"{r.preferred_obs_id!r} is not a candidate of conflict {cid!r}")
             excluded.update({o: f"conflict {cid}: resolved in favour of {r.preferred_obs_id}"
@@ -157,8 +173,10 @@ def apply_resolutions(obs: Sequence[Observation], conflicts: Sequence[Conflict],
         elif r.choice == "exclude":
             excluded.update({o: f"conflict {cid}: all values excluded by the user" for o in candidates})
     kept = [o for o in obs if o.obs_id not in excluded]
-    return kept, [ExcludedObservation(obs_id=o.obs_id, reason=excluded[o.obs_id]) for o in obs
-                  if o.obs_id in excluded]
+    return ResolutionResult(
+        kept=kept,
+        excluded=[ExcludedObservation(obs_id=o.obs_id, reason=excluded[o.obs_id]) for o in obs if o.obs_id in excluded],
+        labels={o.obs_id: source_label(o) for o in kept if o.obs_id in keep_both})
 
 
 def fill_gaps(upload_obs: Sequence[Observation], api_obs: Sequence[Observation], links: Iterable[IndicatorLink],
@@ -193,9 +211,10 @@ def fill_gaps(upload_obs: Sequence[Observation], api_obs: Sequence[Observation],
         prov = a.provenance
         if not isinstance(prov, ApiProvenance):
             continue  # only API data may fill gaps
-        filled.append(a.model_copy(update={"indicator_code": upload_code,
-                                           "indicator_label": next(iter(points.values())).indicator_label}))
-        report.filled.append(FilledPoint(indicator=upload_code, region=a.region_code, period=a.period,
-                                         obs_id=a.obs_id, api_name=prov.api_name, series_id=prov.series_id,
+        point = a.model_copy(update={"obs_id": make_obs_id("gapfill", a.obs_id, upload_code)})
+        filled.append(point)
+        report.filled.append(FilledPoint(indicator=a.indicator_code, upload_indicator=upload_code,
+                                         region=a.region_code, period=a.period, obs_id=point.obs_id,
+                                         source_obs_id=a.obs_id, api_name=prov.api_name, series_id=prov.series_id,
                                          replaced_obs_id=existing.obs_id if existing is not None else None))
     return filled, report

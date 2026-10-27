@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from statbrief.domain.observation import Observation
+
 ConflictChoice = Literal["prefer", "keep_both", "exclude"]
 
 
@@ -79,6 +81,18 @@ class ExcludedObservation(BaseModel):
     reason: str
 
 
+class ResolutionResult(BaseModel):
+    """Observations kept after resolving conflicts, the excluded ones with reasons, and source labels.
+
+    `labels` maps the obs_id of every candidate kept under "keep_both" to a source label
+    (e.g. "Upload: irs.xlsx", "Eurostat: une_rt_m?..."), so the UI and report can show both values labelled.
+    """
+
+    kept: list[Observation]
+    excluded: list[ExcludedObservation] = Field(default_factory=list)
+    labels: dict[str, str] = Field(default_factory=dict)
+
+
 class UnresolvedConflicts(Exception):
     """Conflicts still lack a resolution; drafting is blocked until each is resolved (AC 21)."""
 
@@ -89,13 +103,20 @@ class UnresolvedConflicts(Exception):
 
 
 class FilledPoint(BaseModel):
-    """One gap in uploaded data filled from an API observation (which keeps its API provenance)."""
+    """One gap in uploaded data filled from an API observation (which keeps its API provenance).
+
+    `indicator` is the catalog code (the naming space of `combine`); `obs_id` is the filled point's own id,
+    `source_obs_id` the API observation it copies, and `replaced_obs_id` the uploaded point with a missing
+    value that the filled point replaces (None when the period was absent).
+    """
 
     model_config = ConfigDict(frozen=True)
     indicator: str
+    upload_indicator: str
     region: str
     period: str
     obs_id: str
+    source_obs_id: str
     api_name: str
     series_id: str
     replaced_obs_id: str | None = None  # the uploaded observation with a missing value, if there was one
