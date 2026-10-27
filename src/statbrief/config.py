@@ -89,6 +89,21 @@ class Settings(BaseSettings):
     max_revisions: int = Field(3, ge=0)  # verify -> revise cycles before safe failure (D-010, AC 27)
     max_parse_retries: int = Field(2, ge=0)  # retries of an unparseable LLM draft (D-010)
 
+    # LLM layer (M6). The chat model is built with init_chat_model(f"{llm_provider}:{llm_model}").
+    llm_provider: Literal["openai"] = "openai"
+    llm_model: str = Field("gpt-5-mini", min_length=1)
+    # Ignored by langchain-openai for reasoning models (gpt-5, gpt-5-mini: only the default 1 is accepted).
+    llm_temperature: float = Field(0.2, ge=0.0, le=2.0)
+    llm_timeout_s: float = Field(60.0, gt=0)  # per model request
+    llm_max_retries: int = Field(2, ge=0, le=10)  # provider-level retries of a failed request
+    # with_structured_output method: "function_calling" (tool call, lenient schema) or "json_schema".
+    llm_structured_output_method: Literal["function_calling", "json_schema"] = "function_calling"
+    llm_max_tool_steps: int = Field(6, ge=1, le=50)  # model turns in one tool-calling loop
+    max_tool_rows: int = Field(200, ge=1)  # rows one query_observations tool call may return
+    prompt_max_metrics: int = Field(80, ge=1)  # metrics listed in a prompt (significant ones first)
+    prompt_max_passages: int = Field(8, ge=1)  # retrieved passages included in a prompt
+    log_prompts: bool = False  # debug: store prompt/response text in run_events (owner-only diagnostics)
+
     cron_secret: SecretStr = SecretStr("")
 
     sse_diag_ticks: int = Field(5, ge=1, le=60)
