@@ -1,4 +1,6 @@
 """Tests for deterministic metric computation (AC 23–24)."""
+from decimal import Decimal
+
 import pytest
 
 from statbrief.analytics.metrics import compute_metrics, compute_single, is_rate, shift_period
@@ -39,11 +41,11 @@ def test_monthly_rate_yoy_is_pp_change():
     res, skips = compute_metrics(data, indicator="HICP", region="RO")
     r = _by_id(res)
     yoy = r["pp_change:HICP:RO:2024-03:2023-03"]
-    assert yoy.value == 5.27 - 5.0 and yoy.unit == "pp"
+    assert yoy.value == 0.27 and yoy.unit == "pp"  # exact decimal difference
     assert yoy.observation_ids == ["HICP|RO|2024-03|%", "HICP|RO|2023-03|%"]
     assert "5.27" in yoy.formula and "5.0" in yoy.formula
     assert r["latest:HICP:RO:2024-03"].value == 5.27
-    assert r["pp_change:HICP:RO:2024-03:2024-02"].value == 5.27 - 6.0  # MoM of a rate, in pp
+    assert r["pp_change:HICP:RO:2024-03:2024-02"].value == -0.73  # MoM of a rate, in pp
     assert not any(x.kind in ("yoy", "mom", "pct_change") for x in res)
     assert "rate" in _skip(skips, "pct_change").reason
 
@@ -54,9 +56,9 @@ def test_level_yoy_is_percent_unrounded():
     res, _ = compute_metrics(data, indicator="HICP", region="RO")
     r = _by_id(res)
     yoy = r["yoy:HICP:RO:2024"]
-    assert yoy.value == (104.2 / 100.9 - 1) * 100 and yoy.unit == "%"
+    assert yoy.value == float((Decimal("104.2") / Decimal("100.9") - 1) * 100) and yoy.unit == "%"
     assert "104.2" in yoy.formula and "100.9" in yoy.formula and repr(yoy.value) in yoy.formula
-    assert r["abs_change:HICP:RO:2024:2023"].value == 104.2 - 100.9
+    assert r["abs_change:HICP:RO:2024:2023"].value == 3.3  # exact decimal difference, no float noise
     assert r["abs_change:HICP:RO:2024:2023"].unit == "I15"
     assert r["pct_change:HICP:RO:2024:2023"].value == yoy.value
 
@@ -67,7 +69,7 @@ def test_mom_not_on_quarterly():
     res, skips = compute_metrics(data, indicator="HICP", region="RO")
     assert "monthly" in _skip(skips, "mom").reason
     q = _by_id(res)["qoq:HICP:RO:2024-Q1"]
-    assert q.value == (210.0 / 200.0 - 1) * 100
+    assert q.value == 5.0
     assert _by_id(res)["latest:HICP:RO:2024-Q1"].unit_multiplier == 6
 
 
@@ -190,4 +192,37 @@ def test_mixed_frequencies_kept_apart():
     res, _ = compute_metrics(data, indicator="HICP", region="RO")
     ids = _by_id(res)
     assert ids["latest:HICP:RO:2024"].value == 2.0 and ids["latest:HICP:RO:2024-02"].value == 4.0
-    assert ids["mom:HICP:RO:2024-02"].value == (4.0 / 3.0 - 1) * 100
+    assert ids["mom:HICP:RO:2024-02"].value == float((Decimal(4) / Decimal(3) - 1) * 100)
+
+
+# --- review fixes -----------------------------------------------------------------------------------------
+
+def test_changes_computed_without_float_noise():
+    """Differences and percent changes are exact decimals (I3): 5.35 - 5.0 = 0.35, 100 -> 102.5 = 2.5 %."""
+    rate = [obs("2023", 5.0), obs("2024", 5.35)]
+    assert compute_single(rate, kind="pp_change", indicator="HICP", region="RO", period="2024",
+                          base_period="2023").value == 0.35
+    level = [obs("2023", 100.0, unit="RON"), obs("2024", 102.5, unit="RON")]
+    assert compute_single(level, kind="yoy", indicator="HICP", region="RO", period="2024").value == 2.5
+
+
+@pytest.mark.parametrize("unit", ["RCH_A", "RCH_M", "RCH_Q", "PC", "PC_ACT", "PC_GDP", "PCH_PRE", "PCH_SM",
+                                  "percent", "percentage points"])
+def test_is_rate_recognises_eurostat_rate_codes(unit):
+    """Raw Eurostat rate codes from uncurated API series and spelled-out units are rates (I6)."""
+    assert is_rate(unit)
+
+
+@pytest.mark.parametrize("unit", ["PPS", "EUR_HAB", "CLV10_EUR", "I21", "PCS", "PERS", "MIO_EUR"])
+def test_is_rate_rejects_level_codes(unit):
+    """Level codes that merely start with P are not rates."""
+    assert not is_rate(unit)
+
+
+def test_eurostat_rate_series_yoy_is_pp_change():
+    """An uncurated RCH_A series never gets a percent-of-a-percent YoY (I6)."""
+    data = [obs("2023", 5.0, unit="RCH_A"), obs("2024", 5.27, unit="RCH_A")]
+    res, _ = compute_metrics(data, indicator="HICP", region="RO")
+    r = _by_id(res)
+    assert r["pp_change:HICP:RO:2024:2023"].value == 0.27 and r["pp_change:HICP:RO:2024:2023"].unit == "pp"
+    assert all(x.kind != "yoy" for x in res)

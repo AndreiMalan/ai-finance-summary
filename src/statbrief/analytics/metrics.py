@@ -10,24 +10,47 @@ Rules (AC 23–24, D-010):
 - Levels: YoY/MoM/QoQ/pct_change are ``(v_t / v_base − 1) × 100`` in ``%``; abs_change is in the series unit.
 - Never across different units or unit multipliers; never with a missing, duplicated, zero or negative base
   (zero/negative only matter for percent changes). Each refusal is a `MetricSkip` with its reason.
-- Values are exact floats: no rounding here (rounding is a presentation concern).
+- Values are computed in `Decimal` from the inputs' shortest representation (28 significant digits) and
+  stored as the nearest float: no rounding here (rounding is a presentation concern).
+- Precondition: conflicting observations for one key (an upload and an API for the same period) must be
+  resolved first (M3 `combine`/`apply_resolutions`); otherwise every metric touching that period is skipped
+  as ambiguous.
 """
+import re
 from collections.abc import Iterable
+from decimal import Decimal
 
 import pandas as pd
 
 from statbrief.domain.metrics import BASED_KINDS, MetricResult, MetricSkip, metric_id, period_frequency
 from statbrief.domain.observation import Observation
+from statbrief.ingest.units import normalize_unit
 
 RATE_UNITS: frozenset[str] = frozenset({"%", "pp"})  # canonical unit codes (statbrief.ingest.units)
+# Raw Eurostat unit codes that are rates, as uncurated API series carry them (M3 `advanced_spec` keeps the
+# response's unit code): RCH_* rate of change, PCH_* percentage change, PC / PC_* percentage (share).
+# Protocol codes from the Eurostat `unit` code list, not tunables.
+_EUROSTAT_RATE = re.compile(r"(?:RCH|PCH|PC)(?:_[A-Z0-9_]+)?")
 PERIODS_PER_YEAR = {"A": 1, "Q": 4, "M": 12}  # calendar facts, not tunables
 _STEP_KIND = {"M": "mom", "Q": "qoq"}  # period-on-period kind per frequency
 _COLUMNS = ["period", "value", "unit", "unit_multiplier", "obs_id"]
 
 
+def rate_unit(unit: str) -> str | None:
+    """The canonical rate unit ("%" or "pp") of a unit spelling or Eurostat rate code, else None (a level).
+
+    Recognises the canonical codes, their spellings via `statbrief.ingest.units.normalize_unit` ("percent",
+    "p.p.") and raw Eurostat rate codes (RCH_A, PC_ACT, PCH_PRE, ...), which count as "%".
+    """
+    if _EUROSTAT_RATE.fullmatch(unit.strip()):
+        return "%"
+    n = normalize_unit(unit)
+    return n.code if n is not None and n.code in RATE_UNITS and n.multiplier == 0 else None
+
+
 def is_rate(unit: str) -> bool:
-    """True for rate units (percent and percentage points), whose changes are percentage-point differences."""
-    return unit in RATE_UNITS
+    """True for rate units (percent, percentage points, Eurostat rate codes): their changes are pp differences."""
+    return rate_unit(unit) is not None
 
 
 def shift_period(period: str, n: int) -> str:
@@ -162,6 +185,9 @@ def _change(current: pd.Series, prior: pd.Series, ctx: _Ctx) -> MetricResult | M
                         f"{current['unit']} (×10^{current['unit_multiplier']}) at {ctx.period}")
     unit, mult = current["unit"], int(current["unit_multiplier"])
     vt, vb = float(current["value"]), float(prior["value"])
+    # Exact decimal arithmetic on the inputs as written (shortest repr), so 5.35 − 5.0 is 0.35, not
+    # 0.34999999999999964: float noise would otherwise break half-up rounding at ties in the verifier.
+    dt, db = Decimal(repr(vt)), Decimal(repr(vb))
     ids = [current["obs_id"], prior["obs_id"]]
     based = ctx.kind in BASED_KINDS
     rate = is_rate(unit)
@@ -170,7 +196,7 @@ def _change(current: pd.Series, prior: pd.Series, ctx: _Ctx) -> MetricResult | M
             return ctx.skip(f"pp_change only applies to rates (unit {unit}); use abs_change or pct_change")
         if ctx.kind == "abs_change" and rate:
             return ctx.skip(f"rate series ({unit}): the absolute change is reported as pp_change")
-        diff = vt - vb
+        diff = float(dt - db)
         out_unit = "pp" if rate else unit
         return ctx.result(diff, out_unit, 0 if rate else mult, ids,
                           f"{vt!r} [{ctx.period}] − {vb!r} [{ctx.base}] = {diff!r}", based)
@@ -180,7 +206,7 @@ def _change(current: pd.Series, prior: pd.Series, ctx: _Ctx) -> MetricResult | M
         return ctx.skip(f"zero base at {ctx.base}: percent change undefined (division by zero)")
     if vb < 0:
         return ctx.skip(f"negative base at {ctx.base}: percent change not meaningful")
-    pct = (vt / vb - 1) * 100
+    pct = float((dt / db - 1) * 100)
     return ctx.result(pct, "%", 0, ids, f"({vt!r} [{ctx.period}] / {vb!r} [{ctx.base}] − 1) × 100 = {pct!r}", based)
 
 
