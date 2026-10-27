@@ -2,47 +2,58 @@
 
 Precision rule: a stated number fixes its own precision by the decimals written ("5.3" → 1 decimal, "5" → 0).
 The recomputed value is rounded half-up (ties away from zero) at that precision, starting from its shortest
-decimal representation (``repr``), and must equal the stated number exactly. "5,3" (decimal comma) is accepted.
+decimal representation (``repr``; metrics are computed in exact decimal arithmetic, so ties such as
+5.35 − 5.0 = 0.35 are real ties), and must equal the stated number exactly.
 
-Number tokens (`extract_numbers`): optional sign (+, -, −), digits with an optional ``.``/``,`` decimal part or
-unambiguous thousands grouping ("1,234,567", "1,234.5", "1.234,5"), an optional unit (% / percent /
-procent(e) → ``%``; pp / p.p. / percentage point(s) / puncte procentuale → ``pp``) or a glued letter suffix
-("1.5x", kept as a unitless number so it must still be backed by a claim). Not numbers: citation
-markers ``[1]``, periods (``2024-03``, ``2024-Q1``, ``Q1``/``T1``/``H1``), dates (``15.03.2024``), section, table
-and figure references (``§3.2``, "Section 4"), ordinals ("3rd", "al 3-lea"), decades ("1990s"), digits glued
-after letters ("v2", "RO113", "COVID-19"), and bare years 1900–2100 not followed by a unit, multiplier or
-currency word. A single grouping-like separator followed by exactly three digits ("12,345", "1.234") is
-*ambiguous* (thousands or decimals?) and can never be verified: it must be rewritten.
+Number tokens (`extract_numbers`) are read the English way (reports are English-only, spec.md:12): optional
+sign (+, -, −); ``.`` is the decimal point ("104.235"); ``,`` groups thousands ("12,345", "1,234,567",
+"1,234.5"); "1.234,5" and "1.234.567" are unambiguous continental grouping; a comma followed by one or two
+digits ("5,3", "5,27") is accepted as a decimal comma. Any other comma use ("1234,567", "5,3456") is
+*ambiguous* and can never be verified: the feedback asks for a decimal point and comma grouping.
+A token may carry a unit (% / percent / per cent → ``%``; pp / p.p. / percentage point(s) / %-points /
+% points → ``pp``; Romanian spellings are accepted best effort) or a glued letter suffix ("1.5x", kept as a
+unitless number so it must still be backed by a claim). Not numbers: citation markers ``[1]``, periods
+(``2024-03``, ``2024-Q1``, ``Q1``/``T1``/``H1``), dates (``15.03.2024``), section, table and figure references
+(``§3.2``, "Section 4"), ordinals ("3rd"), decades ("1990s"), digits glued after letters ("v2", "RO113",
+"COVID-19"), and bare years 1900–2100 not followed by a unit, multiplier or currency word — unless the
+number is the value the claim itself states ("1950 workers" for a claim of 1950).
 
 Per-claim checks (`verify_draft`):
 1. every cited observation id exists;
 2. with ``metric_id`` the metric is recomputed (`compute_metric`) and every cited observation must be one of
    its inputs; without it the claim must cite exactly one observation with a value. The stated number (the
-   prose token that states ``claim.value``, else ``claim.value`` itself) must match the recomputed value at
-   its stated precision;
-3. the claim unit (normalised, multiplier included) equals the metric/observation unit, and a unit written
-   next to the number in the text must agree (``%`` and ``pp`` are distinct);
+   prose token that states ``claim.value``, signed like ``claim.value``; else ``claim.value`` itself) must
+   match the recomputed value at its stated precision. A sign-only error gets its own feedback;
+3. the claim unit (normalised; Eurostat rate codes such as RCH_A count as ``%``; multiplier included) equals
+   the metric/observation unit, and a unit written next to the number in the text must agree (``%`` and
+   ``pp`` are distinct);
 4. the claim text contains a number token equal to ``claim.value`` at the token's precision. An unsigned token
-   matches the magnitude, a signed one must match the sign. For change metrics, if the text uses only
-   increase words (rose, grew, up, crescut, ...) the value must be positive; only decrease words (fell,
-   declined, down, scăzut, ...) → negative;
+   matches the magnitude, a signed one must match the sign. Direction words (rose/grew/up/... vs
+   fell/eased/down/...; only when the text uses one family): for true changes (``pp_change``,
+   ``abs_change``, ``pct_change``) they must agree with the sign of the value. For level growth rates
+   (``yoy``/``mom``/``qoq``) "fell to 5.3 %" describes how the rate moved, not its sign, so the check runs
+   only when the text states exactly one earlier rate to compare with ("... from 6.1 %"), and then the
+   word must agree with the move from that rate; otherwise it is skipped;
 5. best-effort period/region consistency: if the text names years, at least one must be the year of the metric
-   period or its base; month-year names ("March 2024", "martie 2024", "2024-03") are checked for monthly
-   metrics and quarter names ("Q1 2024", "2024-Q1") for quarterly ones in the same way; if the text names
-   region codes known to the store, one of them must be the claim's region.
+   period or its base; month-year names ("March 2024", "2024-03") are checked for monthly metrics and quarter
+   names ("Q1 2024", "2024-Q1") for quarterly ones in the same way; if the text names region codes known to
+   the store, one of them must be the claim's region.
 
 Orphans: every number token in the title, finding headlines, section titles/paragraphs and caveats must be
-backed by a claim — for a headline, one of that finding's claims; for a section paragraph, one of that
-section's claims; for the titles and caveats, any claim of the draft. "Backed" means the token equals the
-claim's value at the token's precision (sign rule as in check 4) with a compatible unit.
+backed by a claim referenced by that same finding (headline) or section (title, paragraphs); the report title
+and caveats reference no claims, so numbers there are always orphans. "Backed" means: the token states the
+claim's value (sign rule as in check 4), is written with the same number of decimals as the claim text's own
+statement of it, has a compatible unit, and each claim backs at most one number per headline/paragraph —
+so "5 regions" or a second "5 %" next to a 5.27 % claim are orphans, not coincidental matches.
 """
 import re
+from collections.abc import Iterable
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import NamedTuple
 
-from statbrief.analytics.metrics import PERIODS_PER_YEAR, shift_period
+from statbrief.analytics.metrics import PERIODS_PER_YEAR, rate_unit, shift_period
 from statbrief.analytics.store import MetricUnavailable, ObservationStore, compute_metric
-from statbrief.domain.metrics import MetricResult, period_frequency
+from statbrief.domain.metrics import MetricResult, metric_id, parse_metric_id, period_frequency
 from statbrief.domain.report import NumericalClaim, ReportDraft
 from statbrief.domain.review import ClaimCheck, VerificationResult
 from statbrief.ingest.units import normalize_unit
@@ -51,10 +62,11 @@ _MINUS = "−"  # U+2212, typographic minus
 _SIGN = rf"[+\-{_MINUS}]"
 _NUM = (r"\d{1,3}(?:,\d{3})+\.\d+|\d{1,3}(?:,\d{3}){2,}"      # 1,234.5 / 1,234,567
         r"|\d{1,3}(?:\.\d{3})+,\d+|\d{1,3}(?:\.\d{3}){2,}"     # 1.234,5 / 1.234.567
-        r"|\d+(?:[.,]\d+)?")                                   # 5 / 5.3 / 5,3 (and the ambiguous 12,345)
+        r"|\d+(?:[.,]\d+)?")                                   # 5 / 5.3 / 12,345 / 5,3 (/ ambiguous 1234,567)
 _UNIT_WORDS = {
     "%": "%", "percent": "%", "per cent": "%", "procente": "%", "procent": "%",
     "p.p.": "pp", "pp": "pp", "percentage points": "pp", "percentage point": "pp",
+    "%-points": "pp", "%-point": "pp", "% points": "pp", "% point": "pp",
     "puncte procentuale": "pp", "punct procentual": "pp",
 }
 _UNIT_RE = "|".join(re.escape(u) for u in sorted(_UNIT_WORDS, key=len, reverse=True))
@@ -68,7 +80,7 @@ _MASKS = [re.compile(p, re.IGNORECASE) for p in (
     r"(?<!\d)\d{4}-(?:Q[1-4]|0[1-9]|1[0-2])(?:-\d{2})?(?!\d)",    # 2024-03, 2024-Q1, 2024-03-15
     r"(?<!\d)\d{1,2}[./]\d{1,2}[./]\d{2,4}(?!\d)",                # 15.03.2024, 15/03/24
     r"(?<!\d)\d{1,2}/\d{4}(?!\d)",                                # 03/2024
-    r"(?<!\d)\d+-(?:lea|a)\b",                                      # Romanian ordinals: al 3-lea, a 2-a
+    r"(?<!\d)\d+-(?:lea|a)\b",                                    # Romanian ordinals: al 3-lea, a 2-a
     r"§+\s*\d+(?:\.\d+)*",                                        # §3.2
     r"\b(?:sections?|tables?|figures?|fig\.|charts?|annex|appendix|chapter|tabelul|tabel|figura|graficul|"
     r"sec[țt]iunea|anexa|capitolul)\s+\d+(?:\.\d+)*",              # Section 4.1, table 2
@@ -77,11 +89,13 @@ _YEAR_MIN, _YEAR_MAX = 1900, 2100  # calendar range treated as years in prose (p
 _AFTER_YEAR_VALUE = re.compile(
     r"\s*(?:million|millions|thousand|thousands|billion|billions|mil\.?|mii|mld\.?|lei|ron|eur|euro|usd|"
     r"persons|persoane)\b", re.IGNORECASE)
+# English direction words; Romanian forms are best effort only (reports are English, spec.md:12).
 _INCREASE = re.compile(r"\b(?:rose|rise|risen|rising|increased?|increasing|grew|grow|growth|up|higher|"
                        r"climbed|accelerated|crescut|cre[șs]tere|majorare|avans)\b", re.IGNORECASE)
 _DECREASE = re.compile(r"\b(?:fell|fall|fallen|falling|decreased?|decreasing|declined?|declining|down|lower|"
                        r"dropped|drop|contracted|eased|sc[ăa]zut|sc[ăa]dere|diminuare|redus|reducere)\b",
                        re.IGNORECASE)
+_GROWTH_KINDS = frozenset({"yoy", "mom", "qoq"})  # level growth rates: direction words describe the rate's move
 _MONTHS = {
     m: i + 1 for i, names in enumerate([
         "january jan ianuarie ian", "february feb februarie", "march mar martie", "april apr aprilie",
@@ -94,6 +108,7 @@ _QUARTER = re.compile(r"\b[QT]([1-4])\s+(\d{4})\b|\b(\d{4})\s*-?\s*Q([1-4])\b")
 _ISO_MONTH = re.compile(r"(?<!\d)(\d{4})-(0[1-9]|1[0-2])(?![\d-])")
 _YEAR = re.compile(r"(?<![\d.,])(\d{4})(?!\d|[.,]\d)")
 _CONTEXT_CHARS = 30  # characters of context around an orphan number in reports (presentation only)
+_AMBIGUOUS_HELP = "write decimals with a decimal point (5.3) and thousands with comma grouping (12,345)"
 
 
 class NumberToken(NamedTuple):
@@ -111,16 +126,21 @@ class NumberToken(NamedTuple):
 
 
 def _parse_number(sign: str | None, num: str) -> tuple[Decimal, int, bool]:
-    """Exact decimal value, decimals written and ambiguity of one matched number."""
+    """Exact decimal value, decimals written and ambiguity of one matched number (English reading)."""
     ambiguous = False
     if "," in num and "." in num:
         dec_sep = "." if num.rfind(".") > num.rfind(",") else ","
     elif num.count(",") > 1 or num.count(".") > 1:
         dec_sep = None  # thousands grouping only
-    elif "," in num or "." in num:
-        dec_sep = "," if "," in num else "."
-        head, tail = num.split(dec_sep)
-        ambiguous = len(tail) == 3 and not head.startswith("0")
+    elif "." in num:
+        dec_sep = "."  # English decimal point, any number of decimals ("104.235")
+    elif "," in num:
+        head, tail = num.split(",")
+        if len(tail) == 3 and len(head) <= 3 and not head.startswith("0"):
+            dec_sep = None  # English thousands grouping ("12,345")
+        else:
+            dec_sep = ","  # decimal comma: unambiguous only with 1–2 decimals ("5,3", "5,27")
+            ambiguous = len(tail) > 2
     else:
         dec_sep = None
     if dec_sep is None:
@@ -141,8 +161,12 @@ def _mask(text: str) -> str:
     return text
 
 
-def extract_numbers(text: str) -> list[NumberToken]:
-    """Every number token in `text` that states a quantity (see the module docstring for the exclusions)."""
+def extract_numbers(text: str, claimed: Iterable[float] = ()) -> list[NumberToken]:
+    """Every number token in `text` that states a quantity (see the module docstring for the exclusions).
+
+    A bare year-like integer is kept when it equals one of `claimed` (the value a claim states).
+    """
+    claimed_ints = {int(v) for v in claimed if float(v).is_integer()}
     masked = _mask(text)
     tokens = []
     for m in _TOKEN.finditer(masked):
@@ -152,7 +176,8 @@ def extract_numbers(text: str) -> list[NumberToken]:
                    and _YEAR_MIN <= int(num) <= _YEAR_MAX)
         if suffix and (suffix.lower() in _ORDINAL_SUFFIXES or (is_year and suffix.lower() == "s")):
             continue  # an ordinal ("3rd") or a decade ("1990s")
-        if is_year and not suffix and not _AFTER_YEAR_VALUE.match(masked, m.end()):
+        if (is_year and not suffix and int(num) not in claimed_ints
+                and not _AFTER_YEAR_VALUE.match(masked, m.end())):
             continue  # a bare year
         value, decimals, ambiguous = _parse_number(sign, num)
         tokens.append(NumberToken(raw=text[m.start():m.end()], value=float(value), start=m.start(), end=m.end(),
@@ -193,10 +218,16 @@ def _token_states(tok: NumberToken, value: float) -> bool:
                                           tok.decimals, target)
 
 
-def _canonical_unit(unit: str) -> tuple[str, int]:
-    """(code, multiplier) of a unit spelling, using the ingestion normaliser."""
+def _canonical_unit(unit: str, multiplier: int = 0) -> tuple[str, int]:
+    """(code, multiplier) of a unit spelling: prose unit words, rate codes (RCH_A → %), then the ingest normaliser."""
+    word = _UNIT_WORDS.get(" ".join(unit.lower().split()))
+    if word:
+        return word, multiplier
+    rate = rate_unit(unit)
+    if rate:
+        return rate, multiplier
     n = normalize_unit(unit)
-    return (n.code, n.multiplier) if n else (unit, 0)
+    return (n.code, n.multiplier + multiplier) if n else (unit, multiplier)
 
 
 def _fmt(x: float) -> str:
@@ -209,16 +240,35 @@ def _fmt_at(x: float, decimals: int) -> str:
     return f"{_round_half_up(x, decimals):f}"
 
 
+def _decimals_of(x: float) -> int:
+    """Decimals in the shortest representation of `x` (0 for integers)."""
+    exp = Decimal(repr(float(x))).as_tuple().exponent
+    return max(0, -exp) if isinstance(exp, int) else 0
+
+
+def _unit_label(unit: tuple[str, int]) -> str:
+    """Display form of a (code, multiplier) unit."""
+    code, mult = unit
+    return code if mult == 0 else f"{code} ×10^{mult}"
+
+
 def _allowed_periods(kind: str | None, period: str, base: str | None) -> set[str]:
     """The period a claim is about plus its comparison base (derived for YoY/MoM/QoQ)."""
     allowed = {period}
-    if base:
-        allowed.add(base)
-    elif kind == "yoy":
-        allowed.add(shift_period(period, -PERIODS_PER_YEAR[period_frequency(period)]))
-    elif kind in ("mom", "qoq"):
-        allowed.add(shift_period(period, -1))
+    derived = _derived_base(kind, period) if kind else None
+    for p in (base, derived):
+        if p:
+            allowed.add(p)
     return allowed
+
+
+def _derived_base(kind: str, period: str) -> str | None:
+    """The base period a YoY/MoM/QoQ id implies, else None."""
+    if kind == "yoy":
+        return shift_period(period, -PERIODS_PER_YEAR[period_frequency(period)])
+    if kind in ("mom", "qoq"):
+        return shift_period(period, -1)
+    return None
 
 
 def _period_problem(text: str, allowed: set[str], tokens: list[NumberToken]) -> str | None:
@@ -252,7 +302,7 @@ def _region_problem(text: str, region: str, known: frozenset[str]) -> str | None
 
 
 class _Target(NamedTuple):
-    """What a claim is checked against: value, unit, kind, period, base and region."""
+    """What a claim is checked against: value, canonical unit, kind, period, base and region."""
 
     value: float
     unit: tuple[str, int]
@@ -260,6 +310,24 @@ class _Target(NamedTuple):
     period: str
     base: str | None
     region: str
+
+
+def _replacement_id(mid: str, store: ObservationStore) -> str | None:
+    """For a change id the data refuses on a rate series, the computable pp_change id that states it."""
+    try:
+        p = parse_metric_id(mid)
+    except ValueError:
+        return None
+    base = p.base_period if p.kind in ("abs_change", "pct_change") else (
+        _derived_base(p.kind, p.period) if p.kind in _GROWTH_KINDS else None)
+    if base is None:
+        return None
+    try:
+        candidate = metric_id("pp_change", p.indicator, p.region, p.period, base)
+        compute_metric(candidate, store)
+    except (KeyError, ValueError):
+        return None
+    return candidate
 
 
 def _resolve(claim: NumericalClaim, store: ObservationStore, reasons: list[str]) -> _Target | None:
@@ -272,14 +340,17 @@ def _resolve(claim: NumericalClaim, store: ObservationStore, reasons: list[str])
         try:
             m: MetricResult = compute_metric(claim.metric_id, store)
         except MetricUnavailable as exc:
-            reasons.append(f"metric {claim.metric_id} cannot be computed: {exc.reason}")
+            replacement = _replacement_id(claim.metric_id, store)
+            reasons.append(f"metric {claim.metric_id} cannot be computed: {exc.reason}"
+                           + (f"; use metric_id {replacement}" if replacement else ""))
             return None
         stray = [i for i in claim.observation_ids if i not in m.observation_ids]
         if stray:
             reasons.append(f"observations {', '.join(stray)} are not used by metric {m.metric_id} "
                            f"(inputs: {', '.join(m.observation_ids)})")
             return None
-        return _Target(m.value, (m.unit, m.unit_multiplier), m.kind, m.period, m.base_period, m.region)
+        return _Target(m.value, _canonical_unit(m.unit, m.unit_multiplier), m.kind, m.period, m.base_period,
+                       m.region)
     if len(claim.observation_ids) != 1:
         reasons.append("a claim without metric_id must cite exactly one observation")
         return None
@@ -287,97 +358,136 @@ def _resolve(claim: NumericalClaim, store: ObservationStore, reasons: list[str])
     if o.value is None:
         reasons.append(f"observation {o.obs_id} has no value")
         return None
-    return _Target(o.value, (o.unit, o.unit_multiplier), None, o.period, None, o.region_code)
+    return _Target(o.value, _canonical_unit(o.unit, o.unit_multiplier), None, o.period, None, o.region_code)
 
 
-def _check_claim(claim: NumericalClaim, store: ObservationStore) -> tuple[ClaimCheck, str | None]:
-    """Run checks 1–5 on one claim; returns its check and one feedback line (None when it passes)."""
+def _direction_problem(claim: NumericalClaim, target: _Target, best: NumberToken,
+                       tokens: list[NumberToken]) -> str | None:
+    """Check 4's direction rule (see the module docstring), or None when consistent or not applicable."""
+    if best.signed or target.kind in (None, "latest"):
+        return None
+    up, down = bool(_INCREASE.search(claim.text)), bool(_DECREASE.search(claim.text))
+    if up == down:
+        return None  # no direction word, or both families: nothing reliable to check
+    if target.kind in _GROWTH_KINDS:
+        earlier = [t for t in tokens if t is not best and not t.ambiguous and t.unit == best.unit]
+        if len(earlier) != 1:
+            return None  # "fell to 5.3 %" without an earlier rate: the word describes an unstated move
+        prev = earlier[0].value if earlier[0].signed else abs(earlier[0].value)
+        move, what = target.value - prev, f"the rate moved from {_fmt(prev)} to {_fmt(target.value)}"
+    else:
+        move, what = target.value, f"the change is {_fmt(target.value)}"
+    if move != 0 and (up and move < 0 or down and move > 0):
+        return f"direction: text says {'an increase' if up else 'a decrease'} but {what}"
+    return None
+
+
+def _check_claim(claim: NumericalClaim, store: ObservationStore) -> tuple[ClaimCheck, str | None, int | None]:
+    """Run checks 1–5 on one claim.
+
+    Returns its check, one feedback line (None when it passes) and the decimals of the text's statement of
+    the value (None when the text does not state it), which bounds what the claim can back in prose.
+    """
     reasons: list[str] = []
     target = _resolve(claim, store, reasons)
     if target is None:
         reason = "; ".join(reasons)
-        return ClaimCheck(claim_id=claim.claim_id, ok=False, reason=reason), f"claim {claim.claim_id}: {reason}"
-    tokens = extract_numbers(claim.text)
+        return (ClaimCheck(claim_id=claim.claim_id, ok=False, reason=reason),
+                f"claim {claim.claim_id}: {reason}", None)
+    tokens = extract_numbers(claim.text, claimed=(claim.value,))
     stating = [t for t in tokens if _token_states(t, claim.value)]
-    claim_unit = _canonical_unit(claim.unit)
-    if claim_unit != target.unit:
+    if _canonical_unit(claim.unit) != target.unit:
         reasons.append(f"unit {claim.unit} does not match the data unit {_unit_label(target.unit)}")
     unit_ok = [t for t in stating if t.unit is None or t.unit == target.unit[0]]
-    # The stated number is the prose token that states claim.value; without one, claim.value at its own precision.
-    stated_number, stated_value, stated_decimals = repr(claim.value), Decimal(repr(claim.value)), \
-        _decimals_of(claim.value)
-    value_line = None
-    if not stating:
-        reasons.append(f"text does not state the claim value {_fmt(claim.value)} (found: "
-                       f"{', '.join(t.raw for t in tokens) or 'no number'})")
-    elif not unit_ok:
-        reasons.append(f"text writes {stating[0].raw} in {stating[0].unit} but the data is in "
-                       f"{_unit_label(target.unit)}")
-    if stating:
-        best = (unit_ok or stating)[0]
-        stated_number, stated_value, stated_decimals = best.number, Decimal(repr(best.value)), best.decimals
+    best = (unit_ok or stating or [None])[0]
+    suggestion = None
+    if best is None:
+        ambiguous = [t.raw for t in tokens if t.ambiguous]
+        found = ", ".join(t.raw for t in tokens) or "no number"
+        reasons.append(f"text does not state the claim value {_fmt(claim.value)} (found: {found})"
+                       + (f"; {', '.join(ambiguous)} is ambiguous: {_AMBIGUOUS_HELP}" if ambiguous else ""))
+        stated_number, stated_value, decimals = repr(claim.value), Decimal(repr(claim.value)), \
+            _decimals_of(claim.value)
+    else:
+        if not unit_ok:
+            reasons.append(f"text writes {best.raw} in {best.unit} but the data is in {_unit_label(target.unit)}")
+        stated_number, stated_value, decimals = best.number, Decimal(repr(best.value)), best.decimals
         if not best.signed and claim.value < 0:  # "fell 0.3 pp" states -0.3: the sign comes from claim.value
             stated_value = -stated_value
-        if not best.signed and target.kind not in (None, "latest") and target.value != 0:
-            up, down = bool(_INCREASE.search(claim.text)), bool(_DECREASE.search(claim.text))
-            if up != down and (up and target.value < 0 or down and target.value > 0):
-                reasons.append(f"direction: text says {'an increase' if up else 'a decrease'} but the change "
-                               f"is {_fmt(target.value)}")
-    if not _matches(stated_value, stated_decimals, target.value):
-        value_line = (f"claim {claim.claim_id}: stated {stated_number} {claim.unit}, recomputed "
-                      f"{_fmt(target.value)} {_unit_label(target.unit)} → write "
-                      f"{_fmt_at(target.value, stated_decimals)} {_unit_label(target.unit)}")
-        reasons.append(f"value {stated_number} does not match the recomputed {_fmt(target.value)}")
+        direction = _direction_problem(claim, target, best, tokens)
+        if direction:
+            reasons.append(direction)
+    unit = _unit_label(target.unit)
+    if not _matches(stated_value, decimals, target.value):
+        shown = _fmt_at(target.value, decimals)
+        if target.value != 0 and _matches(abs(stated_value), decimals, abs(target.value)):
+            sign = "negative" if target.value < 0 else "positive"
+            text_part = (f"; the text '{best.raw}' can stay" if best is not None and not best.signed
+                         else f" and write {shown} in the text")
+            reasons.append(f"value sign should be {sign} ({shown} {unit}): set claim.value to "
+                           f"{_fmt(target.value)}{text_part}")
+        else:
+            reasons.append(f"value {stated_number} does not match the recomputed {_fmt(target.value)}")
+            suggestion = f"stated {stated_number} {claim.unit}, recomputed {_fmt(target.value)} {unit} → write " \
+                         f"{shown} {unit}"
     allowed = _allowed_periods(target.kind, target.period, target.base)
     for problem in (_period_problem(claim.text, allowed, tokens),
                     _region_problem(claim.text, target.region, store.regions)):
         if problem:
             reasons.append(problem)
+    stated_decimals = best.decimals if best is not None else None
     if not reasons:
-        return ClaimCheck(claim_id=claim.claim_id, ok=True, expected=target.value), None
+        return ClaimCheck(claim_id=claim.claim_id, ok=True, expected=target.value), None, stated_decimals
     reason = "; ".join(reasons)
-    others = [r for r in reasons if not r.startswith("value ")]
-    line = value_line if value_line and not others else (
-        f"claim {claim.claim_id}: {reason}" + (f" ({value_line.split(': ', 1)[1]})" if value_line else ""))
-    return ClaimCheck(claim_id=claim.claim_id, ok=False, expected=target.value, reason=reason), line
+    if suggestion and len(reasons) == 1:
+        line = f"claim {claim.claim_id}: {suggestion}"
+    else:
+        line = f"claim {claim.claim_id}: {reason}" + (f" ({suggestion})" if suggestion else "")
+    return (ClaimCheck(claim_id=claim.claim_id, ok=False, expected=target.value, reason=reason), line,
+            stated_decimals)
 
 
-def _decimals_of(x: float) -> int:
-    """Decimals in the shortest representation of `x` (0 for integers)."""
-    exp = Decimal(repr(float(x))).as_tuple().exponent
-    return max(0, -exp) if isinstance(exp, int) else 0
+def _backing_claim(tok: NumberToken, claims: list[NumericalClaim], decimals: dict[str, int | None],
+                   used: set[str]) -> str | None:
+    """The id of an unused claim that backs `tok` (see the module docstring), or None."""
+    for c in claims:
+        if (c.claim_id not in used and decimals.get(c.claim_id) == tok.decimals and _token_states(tok, c.value)
+                and (tok.unit is None or tok.unit == _canonical_unit(c.unit)[0])):
+            return c.claim_id
+    return None
 
 
-def _unit_label(unit: tuple[str, int]) -> str:
-    """Display form of a (code, multiplier) unit."""
-    code, mult = unit
-    return code if mult == 0 else f"{code} ×10^{mult}"
-
-
-def _covered(tok: NumberToken, claims: list[NumericalClaim]) -> bool:
-    """Whether a prose token is backed by one of `claims` (value at the token's precision, compatible unit)."""
-    return any(_token_states(tok, c.value) and (tok.unit is None or tok.unit == _canonical_unit(c.unit)[0])
-               for c in claims)
-
-
-def _prose_units(draft: ReportDraft) -> list[tuple[str, str, list[str] | None]]:
-    """(location, text, allowed claim ids or None for any claim) for every piece of prose in the draft."""
-    units: list[tuple[str, str, list[str] | None]] = [("title", draft.title, None)]
+def _prose_units(draft: ReportDraft) -> list[tuple[str, str, list[str]]]:
+    """(location, text, ids of the claims that may back its numbers) for every piece of prose in the draft."""
+    units: list[tuple[str, str, list[str]]] = [("title", draft.title, [])]
     for i, f in enumerate(draft.executive_summary, 1):
         units.append((f"finding {i} headline", f.headline, f.claim_ids))
     for i, s in enumerate(draft.sections, 1):
-        units.append((f"section {i} title", s.title, None))
+        units.append((f"section {i} title", s.title, s.claim_ids))
         units += [(f"section {i} paragraph {j}", p, s.claim_ids) for j, p in enumerate(s.paragraphs, 1)]
-    units += [(f"caveat {k}", c, None) for k, c in enumerate(draft.caveats, 1)]
+    units += [(f"caveat {k}", c, []) for k, c in enumerate(draft.caveats, 1)]
     return units
+
+
+def _orphan_line(where: str, tok: NumberToken) -> str:
+    """Actionable feedback for one unbacked prose number."""
+    if tok.ambiguous:
+        return f"{where}: '{tok.raw}' is ambiguous: {_AMBIGUOUS_HELP}"
+    if where == "title" or where.startswith("caveat"):
+        return f"{where}: '{tok.raw}' cannot be backed by a claim here: remove the number or move it to a section"
+    owner = "finding" if where.startswith("finding") else "section"
+    return (f"{where}: '{tok.raw}' has no supporting claim in this {owner}: add a NumericalClaim stating it with "
+            f"the same decimals and list it in this {owner}'s claim_ids, or remove the number")
 
 
 def verify_draft(draft: ReportDraft, store: ObservationStore) -> VerificationResult:
     """Verify every claim and every prose number of `draft` against `store` (see the module docstring)."""
     checks, lines = [], []
+    stated_decimals: dict[str, int | None] = {}
     for claim in draft.claims:
-        check, line = _check_claim(claim, store)
+        check, line, decimals = _check_claim(claim, store)
         checks.append(check)
+        stated_decimals[claim.claim_id] = decimals
         if line:
             lines.append(line)
     known = {c.claim_id for c in draft.claims}
@@ -388,18 +498,15 @@ def verify_draft(draft: ReportDraft, store: ObservationStore) -> VerificationRes
                 lines.append(f"{where} references unknown claim {cid}: add the claim or remove the reference")
     orphans = []
     for where, text, allowed_ids in _prose_units(draft):
-        claims = draft.claims if allowed_ids is None else [c for c in draft.claims if c.claim_id in allowed_ids]
+        claims = [c for c in draft.claims if c.claim_id in allowed_ids]
+        used: set[str] = set()
         for tok in extract_numbers(text):
-            if _covered(tok, claims):
+            backing = _backing_claim(tok, claims, stated_decimals, used)
+            if backing is not None:
+                used.add(backing)
                 continue
             ctx = text[max(0, tok.start - _CONTEXT_CHARS):tok.end + _CONTEXT_CHARS]
             orphans.append(f"{where}: '{tok.raw}' in \"{ctx}\"")
-            if tok.ambiguous:
-                lines.append(f"{where}: '{tok.raw}' is ambiguous (thousands separator or decimals?): write it "
-                             f"without grouping or with a different number of decimals")
-            else:
-                lines.append(f"{where}: '{tok.raw}' has no supporting claim: add a NumericalClaim and list it "
-                             f"in this {'finding' if 'finding' in where else 'section'}'s claim_ids, or remove "
-                             f"the number")
+            lines.append(_orphan_line(where, tok))
     ok = all(c.ok for c in checks) and not orphans and not lines
     return VerificationResult(ok=ok, checks=checks, orphan_numbers=orphans, feedback="\n".join(lines))

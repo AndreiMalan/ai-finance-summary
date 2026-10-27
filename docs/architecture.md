@@ -40,7 +40,8 @@ AI_Finance_summary/
 │   │       └── catalog.py      # curated IndicatorSpec list (D-005)
 │   ├── analytics/
 │   │   ├── combine.py          # merge datasets, detect_conflicts(), apply_resolutions()
-│   │   ├── metrics.py          # compute_metrics(), compute_metric(metric_id) — pandas only
+│   │   ├── metrics.py          # compute_metrics(), compute_single() — pandas only
+│   │   ├── store.py            # ObservationStore, compute_metric(metric_id, store)
 │   │   ├── significance.py     # flag_significant()
 │   │   └── verify.py           # verify_draft(ReportDraft, ObservationStore) -> VerificationResult
 │   ├── rag/
@@ -126,7 +127,7 @@ class ValidationIssue(BaseModel):
 
 class NumericalClaim(BaseModel):
     claim_id: str; text: str; value: float; unit: str
-    metric_id: str | None                    # e.g. "yoy:prc_hicp_manr:RO:2024-03"
+    metric_id: str | None                    # e.g. "pp_change:HICP_YOY:RO:2024-03:2023-03" (rate YoY)
     observation_ids: list[str] = Field(min_length=1)
 
 class Citation(BaseModel):
@@ -230,10 +231,10 @@ async def fetch_worldbank(req: ApiRequest, client: httpx.AsyncClient) -> ApiFetc
 # analytics
 def detect_conflicts(obs: list[Observation], tol: ConflictTolerance) -> list[Conflict]
 def apply_resolutions(obs, conflicts, resolutions) -> list[Observation]
-def compute_metrics(obs: pd.DataFrame, region: str, indicator: str) -> tuple[list[MetricResult], list[MetricSkip]]
-def compute_metric(metric_id: str, store: ObservationStore) -> MetricResult                     # used by tool + verifier
-def verify_draft(draft: ReportDraft, store: ObservationStore, metrics: list[MetricResult]) -> VerificationResult
-def matches_at_stated_precision(stated: float, stated_text: str, computed: float) -> bool
+def compute_metrics(observations: list[Observation], *, indicator: str, region: str) -> tuple[list[MetricResult], list[MetricSkip]]
+def compute_metric(metric_id: str, store: ObservationStore) -> MetricResult  # store.py; MetricUnavailable(KeyError); used by tool + verifier
+def verify_draft(draft: ReportDraft, store: ObservationStore) -> VerificationResult
+def matches_at_stated_precision(stated_text_number: str, computed: float) -> bool
 # rag
 def index_documents(docs: list[Document], owner: str | None, store: VectorStore) -> int
 def retrieve(query: str, user_id: str, k: int, settings: Settings) -> list[RetrievedPassage]

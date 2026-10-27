@@ -17,7 +17,7 @@ class NumericalClaim(BaseModel):
     text: str = Field(min_length=1)  # the sentence (or fragment) that states the number
     value: float
     unit: str = Field(min_length=1)
-    metric_id: str | None = None  # e.g. "yoy:prc_hicp_manr:RO:2024-03"
+    metric_id: str | None = None  # e.g. "pp_change:HICP_YOY:RO:2024-03:2023-03" (rates) or "yoy:GDP_VOL:RO:2024-Q1"
     observation_ids: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")

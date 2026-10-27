@@ -94,10 +94,12 @@ def test_extract_numbers_year_with_unit_kept_and_no_partial_matches():
 
 
 def test_extract_numbers_grouping_and_ambiguity():
-    """Unambiguous thousands grouping is parsed; a lone ',ddd' or '.ddd' grouping is flagged ambiguous."""
-    toks = extract_numbers("1,234,567 and 1.234.567,5 and 12,345 and 1.234 and 0.125")
+    """English reading (I2): ',ddd' groups thousands, '.' is decimal; '5,3' is a decimal comma; others ambiguous."""
+    toks = extract_numbers("1,234,567 and 1.234.567,5 and 12,345 and 1.234 and 0.125 and 5,3 and 5,27 and "
+                           "1234,567 and 5,3456")
     assert [(t.value, t.ambiguous) for t in toks] == [
-        (1234567.0, False), (1234567.5, False), (12.345, True), (1.234, True), (0.125, False)]
+        (1234567.0, False), (1234567.5, False), (12345.0, False), (1.234, False), (0.125, False), (5.3, False),
+        (5.27, False), (1234.567, True), (5.3456, True)]
 
 
 # --- claim checks ---------------------------------------------------------------------------------------
@@ -265,10 +267,10 @@ def test_dangling_claim_reference_fails():
 
 
 def test_ambiguous_number_in_prose_fails():
-    """A number whose grouping is ambiguous ('12,345') can never be verified and must be rewritten."""
-    res = verify_draft(_draft([_claim()], paragraphs=["Inflation reached 5.27 % in March 2024 in 12,345 homes."]),
+    """An ambiguous separator ('1234,567') can never be verified; the feedback says how to write it."""
+    res = verify_draft(_draft([_claim()], paragraphs=["Inflation reached 5.27 % in March 2024 in 1234,567 homes."]),
                        STORE)
-    assert not res.ok and "ambiguous" in res.feedback
+    assert not res.ok and "ambiguous" in res.feedback and "decimal point" in res.feedback
 
 
 def test_caveat_numbers_checked():
@@ -276,3 +278,135 @@ def test_caveat_numbers_checked():
     d = _draft([_claim()])
     res = verify_draft(d.model_copy(update={"caveats": ["Data revised by 0.4 pp."]}), STORE)
     assert not res.ok and any("0.4" in o for o in res.orphan_numbers)
+
+
+# --- review fixes (regression tests from the review probes) ---------------------------------------------
+
+CPI = [obs("2023-03", 100.0, ind="CPI", unit="I15"), obs("2024-03", 105.27, ind="CPI", unit="I15")]
+POP = [obs("2023", 12000.0, ind="POP", unit="PERS"), obs("2024", 12345.0, ind="POP", unit="PERS")]
+EMP = [obs("2024", 1950.0, ind="EMP", unit="PERS")]
+IDX = [obs("2024", 104.235, ind="IDX", unit="I15")]
+REVIEW_STORE = ObservationStore(CPI + POP + EMP + IDX + RATE)
+CPI_IDS = ("CPI|RO|2024-03|I15", "CPI|RO|2023-03|I15")
+PP_ID = "pp_change:HICP:RO:2024-03:2023-03"
+
+
+def _cpi(text, value=5.27):
+    """A claim on the level YoY yoy:CPI:RO:2024-03 (= 5.27 %)."""
+    return _claim(text=text, value=value, metric_id="yoy:CPI:RO:2024-03", ids=CPI_IDS)
+
+
+@pytest.mark.parametrize("text", ["Annual inflation fell to 5.3 % in March 2024",
+                                  "Annual inflation eased to 5.3 % in March 2024",
+                                  "Annual inflation fell to 5.3 % in March 2024 from 6.1 %"])
+def test_direction_words_on_growth_rates_pass(text):
+    """I1: 'fell to 5.3 %' describes how a growth rate moved, not its sign; no false failure."""
+    assert _check(verify_draft(_draft([_cpi(text)]), REVIEW_STORE)).ok
+
+
+def test_direction_on_growth_rate_checked_against_stated_earlier_rate():
+    """I1: with an explicit earlier rate the direction word must agree with the move from it."""
+    res = verify_draft(_draft([_cpi("Annual inflation rose to 5.3 % in March 2024 from 6.1 %")]), REVIEW_STORE)
+    assert not _check(res).ok and "direction" in _check(res).reason
+
+
+def test_english_thousands_pass():
+    """I2: '12,345 persons' is twelve thousand three hundred forty-five."""
+    c = _claim(text="The population reached 12,345 persons in 2024", value=12345.0, unit="persons",
+               metric_id="latest:POP:RO:2024", ids=("POP|RO|2024|PERS",))
+    res = verify_draft(_draft([c]), REVIEW_STORE)
+    assert res.ok, res.feedback
+
+
+def test_three_decimal_value_passes():
+    """I2: '104.235' is a decimal number."""
+    c = _claim(text="The index stood at 104.235 in 2024", value=104.235, unit="I15", metric_id=None,
+               ids=("IDX|RO|2024|I15",))
+    res = verify_draft(_draft([c]), REVIEW_STORE)
+    assert res.ok, res.feedback
+
+
+@pytest.mark.parametrize("text,ok", [("rose 0.4 pp in 2024", True), ("rose 0.3 pp in 2024", False)])
+def test_rounding_ties_use_half_up_on_exact_value(text, ok):
+    """I3: 5.35 - 5.0 = 0.35 exactly, so '0.4' is the half-up rounding."""
+    store = ObservationStore([obs("2023", 5.0), obs("2024", 5.35)])
+    c = _claim(text=text, value=float(text.split()[1]), unit="pp", metric_id="pp_change:HICP:RO:2024:2023",
+               ids=("HICP|RO|2024|%", "HICP|RO|2023|%"))
+    assert verify_draft(_draft([c]), store).ok is ok
+
+
+def test_rounding_tie_percent_change():
+    """I3: 100 -> 102.5 is a 2.5 % rise, written '3 %' at zero decimals."""
+    store = ObservationStore([obs("2023", 100.0, unit="RON"), obs("2024", 102.5, unit="RON")])
+    c = _claim(text="Output grew 3 % in 2024", value=3.0, unit="%", metric_id="yoy:HICP:RO:2024",
+               ids=("HICP|RO|2024|RON", "HICP|RO|2023|RON"))
+    res = verify_draft(_draft([c]), store)
+    assert res.ok, res.feedback
+
+
+def test_coincidental_prose_numbers_are_orphans():
+    """I4: '5 regions' and 'Bucharest 5 %' are not backed by the 5.27 % claim (probe 6)."""
+    para = "Annual inflation was 5.3 % in March 2024, and 5 regions exceeded 5.3 % too; Bucharest stood at 5 %."
+    res = verify_draft(_draft([_cpi("Annual inflation was 5.3 % in March 2024")], paragraphs=[para]), REVIEW_STORE)
+    assert not res.ok
+    raws = [o.split("'")[1] for o in res.orphan_numbers]
+    assert "5" in raws and "5 %" in raws
+
+
+def test_title_numbers_have_no_backing_claims():
+    """I4: the report title and caveats reference no claims, so a number there is always an orphan."""
+    d = _draft([_claim()])
+    res = verify_draft(d.model_copy(update={"title": "Inflation at 5.27 %"}), STORE)
+    assert not res.ok and any(o.startswith("title") for o in res.orphan_numbers)
+
+
+def test_sign_only_error_rose():
+    """I5: right magnitude, wrong sign of claim.value: the feedback says which sign."""
+    c = _claim(text="Inflation rose 0.3 pp year on year", value=-0.27, unit="pp", metric_id=PP_ID,
+               ids=(LATEST_ID, BASE_ID))
+    res = verify_draft(_draft([c]), STORE)
+    assert not res.ok and "claim c1: value sign should be positive" in res.feedback
+
+
+def test_sign_only_error_fell():
+    """I5: mirror case, 'fell 0.7 pp' with claim.value +0.73 on a -0.73 change."""
+    c = _claim(text="Inflation fell 0.7 pp from February", value=0.73, unit="pp",
+               metric_id="pp_change:HICP:RO:2024-03:2024-02", ids=(LATEST_ID, "HICP|RO|2024-02|%"))
+    res = verify_draft(_draft([c]), STORE)
+    assert not res.ok and "claim c1: value sign should be negative (-0.7 pp)" in res.feedback
+    assert "write -0.7" not in res.feedback
+
+
+def test_year_like_value_is_a_number_when_claimed():
+    """Minor M2: '1950 workers' states the claimed 1950, not a year."""
+    c = _claim(text="Employment was 1950 workers in 2024", value=1950.0, unit="persons",
+               metric_id="latest:EMP:RO:2024", ids=("EMP|RO|2024|PERS",))
+    assert _check(verify_draft(_draft([c]), REVIEW_STORE)).ok
+
+
+def test_singular_percentage_point_unit():
+    """Minor M1: 'percentage point' (singular) is pp, as a claim unit and in prose."""
+    c = _claim(text="Inflation rose 0.3 percentage point year on year", value=0.27, unit="percentage point",
+               metric_id=PP_ID, ids=(LATEST_ID, BASE_ID))
+    res = verify_draft(_draft([c]), STORE)
+    assert res.ok, res.feedback
+
+
+def test_percent_points_spelling_is_pp():
+    """Minor M3: '%-points' and '% points' are percentage points."""
+    assert [t.unit for t in extract_numbers("up 12.5%-points and 3 % points")] == ["pp", "pp"]
+
+
+def test_unavailable_metric_feedback_names_replacement_id():
+    """Minor M4: a YoY id on a rate tells the LLM the exact pp_change id to use."""
+    res = verify_draft(_draft([_claim(metric_id="yoy:HICP:RO:2024-03")]), STORE)
+    assert PP_ID in res.feedback
+
+
+def test_eurostat_rate_unit_claim_in_percent():
+    """I6: a latest value of an RCH_A series may be claimed in %."""
+    store = ObservationStore([obs("2024", 5.27, unit="RCH_A")])
+    c = _claim(text="Inflation was 5.3 % in 2024", value=5.27, unit="%", metric_id="latest:HICP:RO:2024",
+               ids=("HICP|RO|2024|RCH_A",))
+    res = verify_draft(_draft([c]), store)
+    assert res.ok, res.feedback
