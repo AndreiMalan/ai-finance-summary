@@ -51,6 +51,11 @@ class ObservationStore:
         """Every region code present in the store."""
         return frozenset(region for _, region in self._series)
 
+    @property
+    def keys(self) -> frozenset[tuple[str, str]]:
+        """Every (indicator, region) pair present in the store."""
+        return frozenset(self._series)
+
     def series(self, indicator: str, region: str) -> list[Observation]:
         """Observations of one (indicator, region), sorted by frequency and period (empty when none)."""
         return list(self._series.get((indicator, region), ()))
