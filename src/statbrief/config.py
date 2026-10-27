@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     rag_chunk_overlap: int = Field(150, ge=0)  # characters shared by consecutive chunks
     max_reference_mb: int = Field(10, ge=1)  # size cap for user-uploaded reference documents
     max_reference_pages: int = Field(300, ge=1)  # PDF page cap (bounds text-extraction work)
+    significance_rate_pp: float = Field(1.0, gt=0)  # |change| in pp that flags a rate (D-010, AC 25)
+    significance_level_pct: float = Field(2.0, gt=0)  # |% change| that flags a level (D-010, AC 25)
+    top_movers: int = Field(3, ge=0)  # largest |YoY| per indicator and period across >= 2 regions (0 = off)
+    max_revisions: int = Field(3, ge=0)  # verify -> revise cycles before safe failure (D-010, AC 27)
+    max_parse_retries: int = Field(2, ge=0)  # retries of an unparseable LLM draft (D-010)
 
     cron_secret: SecretStr = SecretStr("")
 
