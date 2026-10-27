@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from statbrief.domain.dataset import ColumnMapping, IssueCode
+from statbrief.ingest.detect import is_date_named
 from statbrief.ingest.numbers import NumberError, infer_decimal, is_thousands_lookalike, parse_number
 from statbrief.ingest.periods import ParsedPeriod, PeriodError, parse_period
 from statbrief.ingest.readers import FORMULA_NO_VALUE, RawTable
@@ -64,6 +65,7 @@ class _Options:
 
     day_order: Literal["DMY", "MDY"] | None
     excel_serial: bool
+    yyyymm: bool  # six-digit year-month codes are dates (date-named column only)
     decimal: Literal[".", ","] | None
     decimal_decided: bool  # False → thousands look-alikes are ambiguous
 
@@ -88,7 +90,8 @@ def _options(table: RawTable, mapping: ColumnMapping) -> _Options:
         decimal = infer_decimal(r[idx] for r in table.rows if idx < len(r))
     else:
         decimal = None
-    return _Options(day_order, mapping.date_format == "excel_serial", decimal, decimal is not None)
+    return _Options(day_order, mapping.date_format == "excel_serial", is_date_named(mapping.date_col), decimal,
+                    decimal is not None)
 
 
 def _shown(v: Any) -> str:
@@ -127,7 +130,8 @@ def _role_value(cells: dict[str, Any], mapping: ColumnMapping, role: str) -> tup
 def _parse_period(pr: ParsedRow, value: Any, column: str, opts: _Options) -> None:
     """Fill the period or record invalid_date / ambiguous_date."""
     try:
-        pr.period = parse_period(value, day_order=opts.day_order, excel_serial=opts.excel_serial)
+        pr.period = parse_period(value, day_order=opts.day_order, excel_serial=opts.excel_serial,
+                                 yyyymm=opts.yyyymm)
     except PeriodError as exc:
         pr.problems.append(RowProblem(exc.code, column, str(exc), value=_shown(value)))
 

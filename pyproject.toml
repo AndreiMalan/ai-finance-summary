@@ -33,3 +33,4 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q"
+markers = ["live: hits a real public API; skipped unless RUN_LIVE_TESTS=1"]

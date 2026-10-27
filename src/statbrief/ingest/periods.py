@@ -7,7 +7,8 @@ Accepted forms (years must lie in 1800-2200):
 - datetime/date → monthly; integral numbers 1800-2200 → annual; with `excel_serial=True`,
   numbers in the Excel serial range (1950-2099) → their date's month (a fractional part is the
   time of day and is dropped, also for ASCII text such as "45352.5"; `looks_like_excel_serial`
-  still counts whole numbers only).
+  still counts whole numbers only); with `yyyymm=True` (enabled for date-named columns only),
+  six-digit year-month codes such as 202403 or "202403" → that month.
 - Annual "2024"; quarterly "2024-Q1", "2024Q1", "2024 Q1", "Q1 2024", "Q1-2024".
 - Monthly "2024M03", "2024-03", "2024/03", "2024.03", "03/2024", "03.2024", ISO "2024-03-15"
   (optionally with a time "T08:30" / " 08:30:00.5"),
@@ -40,6 +41,7 @@ _MONTH_NAMES = {
 _MONTH_LOOKUP = {name: num for num, names in _MONTH_NAMES.items() for name in names}
 
 _RE_YEAR = re.compile(r"^(\d{4})$")
+_RE_YYYYMM = re.compile(r"^([0-9]{4})([0-9]{2})$")  # 202403 → 2024-03 (only with yyyymm=True)
 _RE_DECIMAL = re.compile(r"^\d+\.\d+$")  # fractional Excel serial written as text, e.g. "45352.5"
 _RE_Q1 = re.compile(r"^(\d{4})\s*[-/ ]?\s*q([1-4])$", re.I)
 _RE_Q2 = re.compile(r"^q([1-4])\s*[-/ ]?\s*(\d{4})$", re.I)
@@ -106,8 +108,13 @@ def _from_dmy(a: int, b: int, year: int, day_order: DayOrder | None) -> ParsedPe
     return _month(year, month)
 
 
-def parse_period(value: Any, *, day_order: DayOrder | None = None, excel_serial: bool = False) -> ParsedPeriod:
-    """Parse one cell into a canonical period or raise PeriodError."""
+def parse_period(value: Any, *, day_order: DayOrder | None = None, excel_serial: bool = False,
+                 yyyymm: bool = False) -> ParsedPeriod:
+    """Parse one cell into a canonical period or raise PeriodError.
+
+    `yyyymm` accepts six-digit year-month codes (202403 → 2024-03); callers enable it only for columns
+    whose header names a date, so six-digit counts or ids elsewhere are never read as months.
+    """
     if isinstance(value, datetime | date):
         return _month(value.year, value.month)
     if isinstance(value, bool) or value is None:
@@ -116,10 +123,14 @@ def parse_period(value: Any, *, day_order: DayOrder | None = None, excel_serial:
         if excel_serial and _EXCEL_SERIAL_MIN <= value < _EXCEL_SERIAL_MAX + 1:
             d = _EXCEL_EPOCH + timedelta(days=math.floor(value))  # a fraction is the time of day
             return _month(d.year, d.month)
+        if yyyymm and float(value).is_integer() and 100_000 <= value <= 999_999:
+            return _month(*divmod(int(value), 100))
         if float(value).is_integer() and _YEAR_MIN <= value <= _YEAR_MAX:
             return ParsedPeriod(f"{int(value):04d}", "A")
         raise PeriodError("invalid_date", f"{value!r} is not a year or date.")
     s = str(value).strip()
+    if yyyymm and (m := _RE_YYYYMM.match(s)):
+        return _month(int(m[1]), int(m[2]))
     if excel_serial and s.isascii() and s.isdigit():
         return parse_period(int(s), excel_serial=True)
     if excel_serial and s.isascii() and _RE_DECIMAL.match(s) and _EXCEL_SERIAL_MIN <= float(s) < _EXCEL_SERIAL_MAX + 1:

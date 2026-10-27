@@ -188,3 +188,19 @@ def test_reader_warnings_force_review(flag):
     assert not clean.needs_review(0.0)
     flagged = detect_schema(Grid(rows=rows, row_numbers=[1, 2, 3], meta={flag: True}), **KW)
     assert flagged.meta[flag] is True and flagged.needs_review(0.0)
+
+
+def test_yyyymm_codes_detected_as_monthly_dates_in_date_named_column():
+    """A date-named column of yyyymm integers is the date column with monthly frequency."""
+    rows = [["perioada", "judet", "valoare"]] + [[202400 + m, "Cluj", 5.0 + m] for m in (1, 2, 3, 4)]
+    s = detect_schema(Grid(rows=rows, row_numbers=list(range(1, 6))), **KW)
+    roles = {c.column: c.role for c in s.columns}
+    assert roles["perioada"] == "date" and roles["valoare"] == "value"
+    assert s.frequency == "M"
+
+
+def test_yyyymm_codes_not_dates_without_a_date_name():
+    """Six-digit integers under a non-date header stay numbers (e.g. a count column)."""
+    rows = [["cod", "judet", "valoare"]] + [[202400 + m, "Cluj", 5.0 + m] for m in (1, 2, 3, 4)]
+    s = detect_schema(Grid(rows=rows, row_numbers=list(range(1, 6))), **KW)
+    assert {c.column: c.role for c in s.columns}["cod"] != "date"

@@ -12,8 +12,8 @@ Algorithm:
    matches any role name hint, else 0.5 (e.g. a two-cell title row was picked).
 2. For each column take up to `sample_rows` non-empty values (formulas without a cached value
    are skipped). Content shares: `date` = share parseable by `parse_period` (with the inferred
-   day order; Excel serials only for a column whose header has a date name hint, so integer
-   counts in the serial range stay numbers), `region` = share resolved by `resolve_region`,
+   day order; Excel serials and yyyymm codes such as 202403 only for a column whose header has a
+   date name hint, so integer counts in those ranges stay numbers), `region` = share resolved by `resolve_region`,
    `value` = share numeric (damped when the column is date-like, since pure years are numeric),
    `unit` = share whose `normalize_unit` code is canonical (`%`, `pp`, `EUR`, `RON`, `USD`,
    `PERS`, `NR`, `Iyy`), `indicator` = 1 for a text column with distinct/total <= 0.5 that is
@@ -128,12 +128,18 @@ def _share(values: list[Any], ok: Callable[[Any], bool]) -> float:
     return sum(1 for v in values if ok(v)) / len(values) if values else 0.0
 
 
-def _content_scores(values: list[Any], day_order: DayOrder | None, excel_serial: bool) -> dict[str, float]:
+def is_date_named(column: str) -> bool:
+    """True when the header names a date (a date name hint); enables Excel serial and yyyymm parsing."""
+    return _name_score(column, "date") > 0
+
+
+def _content_scores(values: list[Any], day_order: DayOrder | None, excel_serial: bool,
+                    yyyymm: bool) -> dict[str, float]:
     """Per-role content evidence in [0, 1] for one column's sample."""
     def is_date(v: Any) -> bool:
         """Parseable as a period; an ambiguous d/m/y date still counts as date-like."""
         try:
-            parse_period(v, day_order=day_order, excel_serial=excel_serial)
+            parse_period(v, day_order=day_order, excel_serial=excel_serial, yyyymm=yyyymm)
             return True
         except PeriodError as exc:
             return exc.code == "ambiguous_date"
@@ -189,15 +195,16 @@ def detect_schema(grid: Grid, *, sample_rows: int, scan_rows: int,
     table = to_table(grid, header)
     samples = {col: _sample(table.rows, i, sample_rows) for i, col in enumerate(table.columns)}
     scores: dict[tuple[str, str], float] = {}
-    flags: dict[str, tuple[DayOrder | None, bool]] = {}
+    flags: dict[str, tuple[DayOrder | None, bool, bool]] = {}
     for col, values in samples.items():
         if not values:
             continue  # no evidence at all: never map a column on its name alone
         day_order = infer_day_order(values)
-        # Integers in the Excel serial range are only dates when the header names a date.
-        serial = _name_score(col, "date") > 0 and looks_like_excel_serial(values, _EXCEL_SERIAL_SHARE)
-        flags[col] = (day_order, serial)
-        content = _content_scores(values, day_order, serial)
+        # Integers in the Excel serial range and yyyymm codes are only dates when the header names a date.
+        named = is_date_named(col)
+        serial = named and looks_like_excel_serial(values, _EXCEL_SERIAL_SHARE)
+        flags[col] = (day_order, serial, named)
+        content = _content_scores(values, day_order, serial, named)
         for role in _ROLES:
             scores[(col, role)] = _CONTENT_W * content[role] + _NAME_W * _name_score(col, role)
     assigned: dict[str, tuple[str, float]] = {}
@@ -223,11 +230,11 @@ def detect_schema(grid: Grid, *, sample_rows: int, scan_rows: int,
     frequency = day_order = None
     serial = False
     if date_col:
-        day_order, serial = flags[date_col]
+        day_order, serial, yyyymm = flags[date_col]
         freqs: Counter[str] = Counter()
         for v in samples[date_col]:
             try:
-                freqs[parse_period(v, day_order=day_order, excel_serial=serial).frequency] += 1
+                freqs[parse_period(v, day_order=day_order, excel_serial=serial, yyyymm=yyyymm).frequency] += 1
             except PeriodError:
                 pass
         frequency = freqs.most_common(1)[0][0] if freqs else None
