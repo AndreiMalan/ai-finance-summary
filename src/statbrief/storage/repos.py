@@ -5,7 +5,7 @@ Every read takes `user_id` and returns None/empty for other users' rows; writes 
 own raise PermissionError (spec AC 6). Malformed ids are treated as "not found" (never a SQL error).
 """
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -384,3 +384,60 @@ class ApiCacheRepo:
             c.execute("INSERT INTO api_cache (report_id, user_id, request_hash, source, url, payload, retrieved_at) "
                       "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (report_id, request_hash) DO NOTHING",
                       (report_id, user_id, request_hash, source, url, Jsonb(payload), retrieved_at))
+
+
+RUN_EVENT_KINDS: tuple[str, ...] = ("llm_start", "llm_end", "llm_error", "tool_start", "tool_end", "tool_error",
+                                    "retrieval", "node")  # mirrors the CHECK constraint of migration 005
+
+
+@dataclass(frozen=True)
+class RunEvent:
+    """One observability event of a report run (model call, tool call, retrieval or graph node).
+
+    `detail` must hold no raw data values, prompt text or keys (the callback handler redacts them).
+    `ts` defaults to the database time when None.
+    """
+
+    kind: str
+    name: str | None = None
+    model: str | None = None
+    latency_ms: int | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    detail: dict[str, Any] = field(default_factory=dict)
+    ts: datetime | None = None
+
+
+class RunEventRepo:
+    """run_events rows, scoped to the owner of the report (Diagnostics tab, AC 51)."""
+
+    def __init__(self, pool: ConnectionPool):
+        """Bind to a pool."""
+        self.pool = pool
+
+    def add(self, user_id: str, report_id: str, event: RunEvent) -> None:
+        """Insert one event; ValueError for an unknown kind, PermissionError unless the user owns the report."""
+        if event.kind not in RUN_EVENT_KINDS:
+            raise ValueError(f"unknown run event kind {event.kind!r}")
+        rid = _uuid(report_id)
+        if rid is None:
+            raise PermissionError("report not owned by user")
+        with self.pool.connection() as c:
+            row = c.execute(
+                "INSERT INTO run_events (report_id, user_id, ts, kind, name, model, latency_ms, prompt_tokens, "
+                "completion_tokens, detail) "
+                "SELECT r.id, r.user_id, coalesce(%s, now()), %s, %s, %s, %s, %s, %s, %s FROM reports r "
+                "WHERE r.id = %s AND r.user_id = %s RETURNING id",
+                (event.ts, event.kind, event.name, event.model, event.latency_ms, event.prompt_tokens,
+                 event.completion_tokens, Jsonb(event.detail), rid, user_id)).fetchone()
+        if row is None:
+            raise PermissionError("report not owned by user")
+
+    def list_for_report(self, user_id: str, report_id: str) -> list[dict]:
+        """The report's events in insertion order; empty for other users and malformed ids."""
+        rid = _uuid(report_id)
+        if rid is None:
+            return []
+        with self.pool.connection() as c:
+            return c.execute("SELECT * FROM run_events WHERE report_id = %s AND user_id = %s ORDER BY id",
+                             (rid, user_id)).fetchall()
