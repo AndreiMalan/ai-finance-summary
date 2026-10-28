@@ -99,3 +99,10 @@ Resume rule: for each stream, check its branch log + uncommitted files in its wo
 | Production deploy | ✅ https://ai-finance-summary.vercel.app (M1) |
 | DEMO_USER_PASSWORD ≥ 10 chars | ⬜ user to fix in Vercel |
 | OpenAI API key | ⬜ needed at M6 |
+
+## User actions — deferred to the end (user decision 2026-10-29)
+Do not block or remind mid-build; present this list once after M9.
+1. Vercel env `DEMO_USER_PASSWORD` ≥ 10 chars (Production) → redeploy → /healthz shows `"demo_user":"ok"`.
+2. OpenAI project key with a monthly budget limit → `OPENAI_API_KEY` in Vercel (Production + Preview) and local `.env` (never in chat).
+3. Run `scripts/index_knowledge_base.py` against Neon once the key exists (embeddings; FTS works without).
+4. Live smoke test of the full flow on production (upload sample → API fetch → resolve → draft → approve → export).
