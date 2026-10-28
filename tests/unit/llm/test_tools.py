@@ -55,7 +55,7 @@ def test_list_available_metrics_filters():
     out = json.loads(_tools()["list_available_metrics"].invoke({"indicator_code": "HICP_YOY"}))
     assert {m["metric_id"] for m in out["metrics"]} == {"latest:HICP_YOY:RO:2024-03",
                                                          "pp_change:HICP_YOY:RO:2024-03:2023-03"}
-    assert json.loads(_tools()["list_available_metrics"].invoke({"region": "BG"}))["metrics"] == []
+    assert _tools()["list_available_metrics"].invoke({"region": "BG"}) == "error: no metrics match; known regions: RO"
     assert len(json.loads(_tools()["list_available_metrics"].invoke({}))["metrics"]) == 5
 
 
@@ -148,3 +148,53 @@ def test_tool_loop_bounded_by_max_steps():
     msgs = run_tool_loop(model, list(_tools().values()), [HumanMessage(content="?")],
                          make_settings(llm_max_tool_steps=2))
     assert sum(isinstance(m, AIMessage) for m in msgs) == 2
+
+
+# --- review fixes M3 / M4 / M11 ---------------------------------------------------------------------------
+
+def test_row_budget_caps_rows_across_calls():
+    """Review M4: MAX_TOOL_ROWS_PER_TURN bounds the rows of all query_observations calls of one tool list."""
+    assert make_settings().max_tool_rows_per_turn == 400
+    q = _tools(settings=make_settings(max_tool_rows=3, max_tool_rows_per_turn=5))["query_observations"]
+    args = {"indicator_code": "UNEMP_RATE", "region": "RO"}
+    first, second = json.loads(q.invoke(args)), json.loads(q.invoke(args))
+    assert len(first["rows"]) == 3 and len(second["rows"]) == 2 and second["truncated"] is True
+    assert second["row_budget_remaining"] == 0
+    assert q.invoke(args).startswith("error: row budget exhausted")
+
+
+def test_row_budget_shared_in_tool_loop():
+    """Parallel calls in one loop draw on the same budget."""
+    calls = [{"name": "query_observations", "args": {"indicator_code": "UNEMP_RATE", "region": "RO"},
+              "id": f"q{i}", "type": "tool_call"} for i in range(3)]
+    model = ToolFakeListChatModel(responses=[AIMessage(content="", tool_calls=calls), AIMessage(content="done")])
+    tools = list(_tools(settings=make_settings(max_tool_rows=10, max_tool_rows_per_turn=15)).values())
+    msgs = run_tool_loop(model, tools, [HumanMessage(content="?")], make_settings())
+    contents = [m.content for m in msgs if isinstance(m, ToolMessage)]
+    assert len(json.loads(contents[0])["rows"]) == 10 and len(json.loads(contents[1])["rows"]) == 5
+    assert contents[2].startswith("error: row budget exhausted")
+
+
+def test_wrong_frequency_window_is_an_error_not_empty():
+    """Review M3: a quarterly bound on a monthly series explains the frequency instead of returning nothing."""
+    msg = _tools()["query_observations"].invoke(
+        {"indicator_code": "UNEMP_RATE", "region": "RO", "period_from": "2024-Q1"})
+    assert msg.startswith("error: series UNEMP_RATE/RO has frequency M") and "2024-01" in msg
+
+
+def test_metric_filter_without_match_lists_known_codes():
+    """Review M3: a non-matching filter (e.g. wrong case) lists the known codes."""
+    msg = _tools()["list_available_metrics"].invoke({"indicator_code": "hicp_yoy"})
+    assert msg.startswith("error: no metrics match; known indicators: HICP_YOY, UNEMP_RATE")
+
+
+def test_unexpected_tool_exception_becomes_error_message(monkeypatch):
+    """Review M11: an unexpected exception inside a tool is returned as its type, never raised."""
+    from statbrief.llm import tools as tools_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("secret detail")
+
+    monkeypatch.setattr(tools_mod, "compute_metric", boom)
+    msg = _call(_tools()["compute_metric"], {"metric_id": "latest:UNEMP_RATE:RO:2024-01"})
+    assert msg.content == "error: RuntimeError" and "secret" not in msg.content

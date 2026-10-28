@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     llm_structured_output_method: Literal["function_calling", "json_schema"] = "function_calling"
     llm_max_tool_steps: int = Field(6, ge=1, le=50)  # model turns in one tool-calling loop
     max_tool_rows: int = Field(200, ge=1)  # rows one query_observations tool call may return
+    max_tool_rows_per_turn: int = Field(400, ge=1)  # rows all query_observations calls of one tool loop may return
     prompt_max_metrics: int = Field(80, ge=1)  # metrics listed in a prompt (significant ones first)
     prompt_max_passages: int = Field(8, ge=1)  # retrieved passages included in a prompt
     log_prompts: bool = False  # debug: store prompt/response text in run_events (owner-only diagnostics)

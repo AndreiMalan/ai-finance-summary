@@ -4,6 +4,7 @@
 provider and model are switched with LLM_PROVIDER / LLM_MODEL only. Building the client makes no network
 call; requests happen only when the model is invoked. Tests inject fake chat models instead.
 """
+import logging
 from collections.abc import Sequence
 
 from langchain.chat_models import init_chat_model
@@ -16,7 +17,8 @@ from statbrief.config import Settings
 from statbrief.llm.callbacks import DailyLLMCap, LLMCapCallbackHandler
 from statbrief.rag.embeddings import make_embeddings
 
-GENERIC_LLM_ERROR = "The language model could not complete this step. Please try again later."
+logger = logging.getLogger(__name__)
+GENERIC_LLM_ERROR ="The language model could not complete this step. Please try again later."
 
 
 class LLMNotConfigured(RuntimeError):
@@ -35,6 +37,10 @@ def get_chat_model(settings: Settings, *, cap_guard: DailyLLMCap | None,
     """
     if settings.openai_api_key is None:
         raise LLMNotConfigured(f"no API key configured for LLM provider {settings.llm_provider!r}")
+    model_id = settings.llm_model.lower()
+    if model_id.startswith("gpt-5") and "chat" not in model_id and settings.llm_temperature != 1:
+        logger.info("LLM_TEMPERATURE=%s is ignored by %s (reasoning models accept only the default)",
+                    settings.llm_temperature, settings.llm_model)
     return init_chat_model(
         f"{settings.llm_provider}:{settings.llm_model}",
         temperature=settings.llm_temperature,

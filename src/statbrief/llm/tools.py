@@ -5,10 +5,15 @@ metrics and the indicator catalog, so a tool can never reach another user's data
 that selects a user or a report. Every tool has a Pydantic `args_schema` (extra arguments forbidden);
 invalid arguments come back to the model as an "error: invalid arguments ..." message it can correct,
 never as an exception. Results are compact JSON with selected fields only (AC 35): `query_observations`
-returns at most MAX_TOOL_ROWS rows, and `compute_metric` recomputes deterministically with M4 — the model
-never does arithmetic.
+returns at most MAX_TOOL_ROWS rows per call and at most MAX_TOOL_ROWS_PER_TURN rows across all calls of
+one tool list (`RowBudget`; build the tools once per tool loop), and `compute_metric` recomputes
+deterministically with M4 — the model never does arithmetic. An unexpected exception inside a tool is
+returned as "error: <ExceptionType>" (the message is not echoed), so it never escapes into the graph.
 """
+import functools
 import json
+import threading
+from collections.abc import Callable
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -93,6 +98,34 @@ def validation_error_message(err: ValidationError) -> str:
     return f"error: invalid arguments: {problems}"
 
 
+class RowBudget:
+    """Total observation rows the tools of one tool loop may still return (MAX_TOOL_ROWS_PER_TURN)."""
+
+    def __init__(self, limit: int) -> None:
+        """Start with `limit` rows."""
+        self.remaining = limit
+        self._lock = threading.Lock()
+
+    def take(self, wanted: int) -> int:
+        """Grant up to `wanted` rows and deduct them; 0 when the budget is spent."""
+        with self._lock:
+            granted = max(0, min(wanted, self.remaining))
+            self.remaining -= granted
+            return granted
+
+
+def _safe(fn: Callable[..., str]) -> Callable[..., str]:
+    """Turn an unexpected exception inside a tool into an error message naming only its type."""
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> str:
+        """Run the tool body."""
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:  # defence in depth: tool failures must reach the model, not the graph
+            return f"error: {type(exc).__name__}"
+    return wrapper
+
+
 def _json(obj: Any) -> str:
     """Compact, deterministic JSON."""
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -120,13 +153,20 @@ def _spec_dict(spec: IndicatorSpec) -> dict[str, Any]:
 
 def build_tools(store: ObservationStore, metrics: Sequence[MetricResult], catalog: Mapping[str, IndicatorSpec],
                 user_id: str, settings: Settings, *,
-                series_meta: Mapping[str, SeriesMeta] | None = None) -> list[BaseTool]:
-    """The four controlled tools over one report's data (the store must hold only `user_id`'s report)."""
+                series_meta: Mapping[str, SeriesMeta] | None = None,
+                row_budget: RowBudget | None = None) -> list[BaseTool]:
+    """The four controlled tools over one report's data (the store must hold only `user_id`'s report).
+
+    `row_budget` (default: a fresh RowBudget of MAX_TOOL_ROWS_PER_TURN) is shared by every call of these
+    tools, so build the tools once per tool loop.
+    """
     series_meta = series_meta or {}
+    budget = row_budget or RowBudget(settings.max_tool_rows_per_turn)
     keys = store.keys
     indicators = {ind for ind, _ in keys}
 
     @tool("get_indicator_metadata", args_schema=IndicatorMetadataArgs)
+    @_safe
     def get_indicator_metadata(indicator_code: str) -> str:
         """Describe an indicator: catalog definition (source, dataset, unit, frequency, rate or level),
         source metadata, and the regions and units present in this report's data."""
@@ -143,16 +183,23 @@ def build_tools(store: ObservationStore, metrics: Sequence[MetricResult], catalo
                       "regions_in_data": regions, "units_in_data": units})
 
     @tool("list_available_metrics", args_schema=ListMetricsArgs)
+    @_safe
     def list_available_metrics(indicator_code: str | None = None, region: str | None = None) -> str:
         """List the computed metrics (id, kind, period, value, unit, observation ids), optionally filtered
         by indicator and/or region. Cite these ids in claims."""
         rows = [_metric_row(m) for m in sorted(metrics, key=lambda m: m.metric_id)
                 if (indicator_code is None or m.indicator == indicator_code)
                 and (region is None or m.region == region)]
+        if not rows and (indicator_code is not None or region is not None):
+            hint = ([f"known indicators: {', '.join(sorted({m.indicator for m in metrics}))}"]
+                    if indicator_code is not None else []) + (
+                   [f"known regions: {', '.join(sorted({m.region for m in metrics}))}"] if region is not None else [])
+            return f"error: no metrics match; {'; '.join(hint)}"
         shown = rows[:settings.max_tool_rows]
         return _json({"metrics": shown, "total": len(rows), "truncated": len(rows) > len(shown)})
 
     @tool("query_observations", args_schema=QueryObservationsArgs)
+    @_safe
     def query_observations(indicator_code: str, region: str, period_from: str | None = None,
                            period_to: str | None = None, limit: int | None = None) -> str:
         """Return observations of one indicator and region (selected fields, bounded row count), optionally
@@ -162,16 +209,25 @@ def build_tools(store: ObservationStore, metrics: Sequence[MetricResult], catalo
             return f"error: no observations for indicator {indicator_code!r} in region {region!r}"
         bound = period_from or period_to
         freq = period_frequency(bound) if bound else None
+        if freq is not None and all(o.frequency != freq for o in series):
+            have = sorted({o.frequency for o in series})
+            examples = ", ".join(sorted({o.period for o in series})[-1:])
+            return (f"error: series {indicator_code}/{region} has frequency {'/'.join(have)}, not {freq}; "
+                    f"use periods like {examples}")
         rows = [o for o in series if (freq is None or o.frequency == freq)
                 and (period_from is None or o.period >= period_from) and (period_to is None or o.period <= period_to)]
+        if budget.remaining <= 0:
+            return "error: row budget exhausted for this turn; use compute_metric or list_available_metrics"
         cap = min(limit or settings.max_tool_rows, settings.max_tool_rows)
-        shown = rows[:cap]
+        shown = rows[:budget.take(min(cap, len(rows)))]
         return _json({"rows": [{"obs_id": o.obs_id, "period": o.period, "value": o.value, "unit": o.unit,
                                 "unit_multiplier": o.unit_multiplier, "status_flag": o.status_flag,
                                 "source": _source(o)} for o in shown],
-                      "total": len(rows), "truncated": len(rows) > len(shown)})
+                      "total": len(rows), "truncated": len(rows) > len(shown),
+                      "row_budget_remaining": budget.remaining})
 
     @tool("compute_metric", args_schema=ComputeMetricArgs)
+    @_safe
     def compute_metric_tool(metric_id: str) -> str:
         """Recompute one metric deterministically from its id (kind:indicator:region:period[:base]); returns
         value, unit, input observation ids and formula. Use this instead of doing arithmetic."""

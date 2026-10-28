@@ -92,3 +92,16 @@ def test_cap_guard_attached_at_model_level(monkeypatch):
     get_chat_model(make_settings(openai_api_key="sk-test"), cap_guard=cap, callbacks=[marker])
     first, second = seen["callbacks"]
     assert isinstance(first, LLMCapCallbackHandler) and first.cap is cap and second is marker
+
+
+def test_temperature_drop_logged_for_reasoning_models(caplog):
+    """Review M5: a non-default temperature that gpt-5 models ignore is logged at model build."""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="statbrief.llm.models"):
+        get_chat_model(make_settings(openai_api_key="sk-dummy"), cap_guard=None)
+    assert "LLM_TEMPERATURE" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="statbrief.llm.models"):
+        get_chat_model(make_settings(openai_api_key="sk-dummy", llm_model="gpt-5-chat-latest"), cap_guard=None)
+    assert "LLM_TEMPERATURE" not in caplog.text
