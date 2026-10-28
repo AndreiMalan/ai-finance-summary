@@ -1,5 +1,8 @@
-"""Shared builders for the graph tests: scripted draft payloads and fake models."""
+"""Shared builders for the graph tests: uploads, API observations, scripted draft payloads."""
+from datetime import datetime, timezone
 from typing import Any
+
+from statbrief.domain.observation import ApiProvenance, Observation, make_obs_id
 
 
 def draft_payload(value: float = 0.6, text_value: str | None = None) -> dict[str, Any]:
@@ -35,3 +38,16 @@ def unemp_rows(indicator: str = "IRS_UNEMP", region: str = "RO") -> list[tuple[s
 def monthly(start_year: int, values: list[float]) -> dict[str, float]:
     """{period: value} for consecutive months starting in January of `start_year`."""
     return {f"{start_year + i // 12}-{i % 12 + 1:02d}": v for i, v in enumerate(values)}
+
+
+def api_obs(indicator: str, region: str, values: dict[str, float], unit: str = "%") -> list[Observation]:
+    """API observations (Eurostat provenance) of one series, {period: value}."""
+    prov = ApiProvenance(api_name="eurostat", series_id=f"{indicator}?test", query_url="https://ec.europa.eu/x",
+                         retrieved_at=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    out = []
+    for period, value in values.items():
+        freq = "Q" if "-Q" in period else "M" if "-" in period else "A"
+        out.append(Observation(obs_id=make_obs_id("test", indicator, region, period), indicator_code=indicator,
+                               region_code=region, region_level="country", period=period, frequency=freq,
+                               value=value, unit=unit, provenance=prov))
+    return out
