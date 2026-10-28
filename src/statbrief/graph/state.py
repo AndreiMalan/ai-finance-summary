@@ -80,6 +80,7 @@ class SourceMeta(BaseModel):
     needs_review: bool = False
     detected: DetectedSchema | None = None
     # public APIs
+    indicator: str | None = None  # catalog code of the request
     query_url: str | None = None
     series_label: str | None = None
     unit_label: str | None = None
@@ -240,6 +241,7 @@ class RetrievalInput(TypedDict, total=False):
     user_id: str
     params: ReportParams
     source_metadata: list[SourceMeta]
+    dropped_sources: list[str]
     significant: list[SignificantChange]
 
 

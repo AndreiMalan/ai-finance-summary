@@ -96,7 +96,8 @@ def _time_kwargs(source: str, req: ApiRequest) -> dict[str, Any]:
 
 def _failed_api(req: ApiRequest, label: str, message: str) -> dict[str, Any]:
     """State update for an API source that could not be fetched."""
-    meta = SourceMeta(source_id=req.request_id, kind="api", label=label, status="failed", message=message)
+    meta = SourceMeta(source_id=req.request_id, kind="api", label=label, status="failed", indicator=req.indicator,
+                      message=message)
     return {"source_metadata": [meta], "errors": [WorkflowError(node="fetch_api", kind="api_failed",
                                                                 message=f"{label}: {message}")]}
 
@@ -124,7 +125,7 @@ def fetch_api(task: FetchTask, deps: GraphDeps, config: RunnableConfig) -> dict[
         return _failed_api(req, label, f"unexpected error ({type(exc).__name__})")
     first = result.observations[0].provenance if result.observations else None
     meta = SourceMeta(
-        source_id=req.request_id, kind="api", label=label, status="ok",
+        source_id=req.request_id, kind="api", label=label, status="ok", indicator=req.indicator,
         source_key=f"api:{first.api_name}:{first.series_id}" if first is not None else None,  # type: ignore[union-attr]
         observation_count=len(result.observations), skipped_count=len(result.skipped), from_cache=not cache.stored,
         query_url=first.query_url if first is not None else None,  # type: ignore[union-attr]

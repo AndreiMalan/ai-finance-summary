@@ -181,3 +181,36 @@ def test_chains_build_with_real_openai_model_offline():
     for method in ("function_calling", "json_schema"):
         s = make_settings(openai_api_key="sk-dummy", llm_structured_output_method=method)
         assert build_draft_chain(get_chat_model(s, cap_guard=None), s) is not None
+
+
+# --- M7: drafting through the tool loop ------------------------------------------------------------------------
+
+def test_attempt_from_tool_call_parses_the_reportdraft_call():
+    """The ReportDraft call of a mixed reply is parsed; other calls are ignored."""
+    from statbrief.llm.chains import attempt_from_tool_call
+    msg = AIMessage(content="", tool_calls=[
+        {"name": "list_available_metrics", "args": {}, "id": "a", "type": "tool_call"},
+        {"name": "ReportDraft", "args": valid_draft(), "id": "b", "type": "tool_call"}])
+    attempt = attempt_from_tool_call(msg)
+    assert isinstance(attempt.draft, ReportDraft) and '"title": "Unemployment in Romania"' in attempt.raw_text
+
+
+def test_attempt_from_tool_call_reports_invalid_and_malformed_payloads():
+    """Schema errors name locations only; malformed JSON is reported; nothing raises."""
+    from statbrief.llm.chains import attempt_from_tool_call
+    payload = valid_draft()
+    payload["claims"][0]["value"] = "SECRET"
+    bad = attempt_from_tool_call(tool_call_message("ReportDraft", payload))
+    assert bad.draft is None and "claims.0.value" in bad.parse_error and "SECRET" not in bad.parse_error
+    malformed = attempt_from_tool_call(invalid_tool_call_message("ReportDraft", '{"title": '))
+    assert malformed.draft is None and "malformed" in malformed.parse_error
+
+
+def test_structured_from_messages():
+    """A message list (e.g. after a tool loop) can be turned into a forced structured draft."""
+    from langchain_core.messages import HumanMessage
+
+    from statbrief.llm.chains import build_structured_from_messages
+    model = ToolFakeChatModel(messages=scripted(tool_call_message("ReportDraft", valid_draft())))
+    attempt = build_structured_from_messages(model, make_settings()).invoke([HumanMessage(content="write it")])
+    assert attempt.draft is not None and model.structured_method == "function_calling"

@@ -21,6 +21,34 @@ def draft_payload(value: float = 0.6, text_value: str | None = None) -> dict[str
     }
 
 
+def draft_for(metric, shown: str, *, extra_caveat: str | None = None,
+              acknowledged: list[str] | None = None) -> dict[str, Any]:
+    """A ReportDraft payload stating one pp-change metric as `shown` (e.g. "0.6"), citing its inputs."""
+    sentence = f"Unemployment rose by {shown} percentage points compared with January 2023."
+    caveats = ["Figures for the latest month are provisional."] + ([extra_caveat] if extra_caveat else [])
+    return {
+        "title": "Unemployment in Romania",
+        "executive_summary": [{"headline": sentence, "claim_ids": ["c1"]}],
+        "sections": [{"indicator_code": metric.indicator, "title": "Unemployment", "paragraphs": [sentence],
+                      "claim_ids": ["c1"], "citation_ids": []}],
+        "claims": [{"claim_id": "c1", "text": sentence, "value": float(shown), "unit": "pp",
+                    "metric_id": metric.metric_id, "observation_ids": list(metric.observation_ids)}],
+        "citations": [], "caveats": caveats, "unknown_columns_acknowledged": acknowledged or [],
+    }
+
+
+def report_call(payload: dict[str, Any], call_id: str = "call_1"):
+    """A model reply submitting `payload` as a ReportDraft tool call."""
+    from tests.unit.llm.fakes import tool_call_message
+    return tool_call_message("ReportDraft", payload, call_id=call_id)
+
+
+def fake_model(*replies):
+    """A tool-capable fake chat model answering the scripted replies in order."""
+    from tests.unit.llm.fakes import ToolFakeChatModel
+    return ToolFakeChatModel(messages=iter(replies))
+
+
 def long_csv(rows: list[tuple[str, str, str, float | None, str]],
              header: tuple[str, ...] = ("date", "region", "indicator", "value", "unit")) -> bytes:
     """A long-format CSV (date, region, indicator, value, unit) as uploaded by a user."""

@@ -161,6 +161,35 @@ def _structured_chain(prompt: ChatPromptTemplate, model: BaseChatModel, settings
         "prompt_template": name, "prompt_variables": sorted(prompt.input_variables)})
 
 
+DRAFT_SCHEMA_NAME = ReportDraft.__name__  # the tool name a ReportDraft is submitted under
+
+
+def attempt_from_tool_call(message: AIMessage) -> DraftAttempt:
+    """DraftAttempt from a reply that submits the draft as a `ReportDraft` tool call (tool-loop drafting).
+
+    Parsing and error reporting match `check_parsed`: a malformed or invalid payload sets `parse_error`
+    (locations and reasons only), never raises.
+    """
+    call = next((c for c in message.tool_calls if c["name"] == DRAFT_SCHEMA_NAME), None)
+    if call is None:  # malformed arguments (invalid_tool_calls) or no ReportDraft call at all
+        bad = [c for c in message.invalid_tool_calls if c.get("name") == DRAFT_SCHEMA_NAME]
+        only = message.model_copy(update={"tool_calls": [], "invalid_tool_calls": bad})
+        return check_parsed({"raw": only, "parsed": None, "parsing_error": None})
+    only = message.model_copy(update={"tool_calls": [call], "invalid_tool_calls": []})
+    try:
+        parsed, err = ReportDraft.model_validate(call["args"]), None
+    except ValidationError as exc:
+        parsed, err = None, exc
+    return check_parsed({"raw": only, "parsed": parsed, "parsing_error": err})
+
+
+def build_structured_from_messages(model: BaseChatModel, settings: Settings) -> Runnable[list, DraftAttempt]:
+    """Messages (e.g. a tool conversation) -> forced structured ReportDraft -> DraftAttempt (never raises on parse)."""
+    structured = model.with_structured_output(ReportDraft, include_raw=True,
+                                              method=settings.llm_structured_output_method)
+    return (structured | RunnableLambda(check_parsed)).with_config(run_name="draft_from_messages")
+
+
 def build_draft_chain(model: BaseChatModel, settings: Settings) -> Runnable[dict, DraftAttempt]:
     """DRAFT_PROMPT variables -> DraftAttempt."""
     return _structured_chain(DRAFT_PROMPT, model, settings, "draft")
