@@ -8,8 +8,8 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ```state
 milestone: M7a (M1–M6 merged)
 task: 1-6
-task_title: M7a LangGraph graph core — in review
-phase: reviewing
+task_title: M7a — fixing review C1 (combined-mode duplicates), I1, deviation 6; re-review after
+phase: fixing
 branch: m7-graph
 base_commit: f81aa17
 last_verified_commit: f81aa17
