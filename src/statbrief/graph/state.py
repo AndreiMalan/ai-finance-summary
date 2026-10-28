@@ -146,7 +146,8 @@ class ObservationView(BaseModel):
     """How to read a report's effective observations from the database (see `graph.observations`).
 
     Built from the state by `view_from_state`: the owner and report, the user's indicator links and gap-fill
-    consent, the source keys to leave out (dropped sources), and the conflicts with their resolutions.
+    consent, the source keys to leave out (dropped sources), the period window, and the conflicts with their
+    resolutions.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -155,6 +156,8 @@ class ObservationView(BaseModel):
     links: list[IndicatorLink] = Field(default_factory=list)
     consent_gap_fill: bool = False
     dropped_keys: list[str] = Field(default_factory=list)
+    period_from: str | None = None
+    period_to: str | None = None
     conflicts: list[Conflict] = Field(default_factory=list)
     resolutions: dict[str, ConflictResolution] = Field(default_factory=dict)
 

@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Upper bound (seconds) for one /_diag/sse stream: below Vercel's 300 s function maxDuration
 # (Hobby maximum, vercel.json) with a 10 s margin for cold start and response overhead.
 SSE_DIAG_MAX_TOTAL_S = 290.0
+# Vercel function maxDuration (vercel.json, Hobby maximum); one graph segment must finish well inside it.
+FUNCTION_MAX_DURATION_S = 300.0
 # pgvector's HNSW index supports at most 2000 dimensions for the `vector` type.
 PGVECTOR_HNSW_MAX_DIMENSIONS = 2000
 
@@ -105,6 +107,13 @@ class Settings(BaseSettings):
     prompt_max_passages: int = Field(8, ge=1)  # retrieved passages included in a prompt
     log_prompts: bool = False  # debug: store prompt/response text in run_events (owner-only diagnostics)
 
+    # LangGraph workflow (M7, D-011 toggles). The core path works with every ENABLE_* toggle off (AC 46).
+    enable_parallel: bool = True  # Send fan-out per source / per region x indicator; off -> one sequential node
+    enable_replay: bool = True  # history, replay and fork from checkpoints (M7b)
+    enable_draft_tools: bool = True  # let the model call the controlled tools while drafting (when it supports tools)
+    segment_budget_s: float = Field(240.0, gt=0)  # wall-clock budget of one run segment (< FUNCTION_MAX_DURATION_S)
+    graph_recursion_limit: int = Field(60, ge=10)  # LangGraph super-steps per invocation
+
     cron_secret: SecretStr = SecretStr("")
 
     sse_diag_ticks: int = Field(5, ge=1, le=60)
@@ -176,6 +185,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"SSE_DIAG_TICKS * SSE_DIAG_INTERVAL_S must be below {SSE_DIAG_MAX_TOTAL_S:g} s"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _segment_within_max_duration(self) -> "Settings":
+        """Reject a run-segment budget that would not end before the serverless function is killed."""
+        if self.segment_budget_s >= FUNCTION_MAX_DURATION_S:
+            raise ValueError(f"SEGMENT_BUDGET_S must be below {FUNCTION_MAX_DURATION_S:g} s")
         return self
 
     @property

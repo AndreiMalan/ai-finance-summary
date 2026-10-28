@@ -14,7 +14,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from statbrief.domain.dataset import ColumnMapping, DatasetRef, ValidationReport
-from statbrief.domain.observation import Observation
+from statbrief.domain.observation import ApiProvenance, Observation
 
 # File status after a mapping is (re)saved: validation and normalization must be redone.
 MAPPED_STATUS = "mapped"
@@ -335,12 +335,46 @@ class ObservationRepo:
                           Jsonb(o.model_dump(mode="json"))) for o in observations])
         return len(observations)
 
+    def upsert_api_observations(self, user_id: str, report_id: str, observations: list[Observation]) -> int:
+        """Store public-API observations of the user's report (rows without a file); returns how many.
+
+        An API row with the same obs_id is replaced (the per-report API cache makes a re-fetch identical); a row
+        of an uploaded file is never overwritten. PermissionError unless the user owns the report; ValueError
+        for an observation that does not come from an API.
+        """
+        if any(not isinstance(o.provenance, ApiProvenance) for o in observations):
+            raise ValueError("only API observations can be stored without a file")
+        with self.pool.connection() as c, c.transaction():
+            if _uuid(report_id) is None or not _owns_report(c, user_id, report_id):
+                raise PermissionError("report not owned by user")
+            if observations:
+                with c.cursor() as cur:
+                    cur.executemany(
+                        "INSERT INTO observations (report_id, obs_id, file_id, user_id, indicator_code, region_code, "
+                        "period, payload) VALUES (%s, %s, NULL, %s, %s, %s, %s, %s) "
+                        "ON CONFLICT (report_id, obs_id) DO UPDATE SET indicator_code = EXCLUDED.indicator_code, "
+                        "region_code = EXCLUDED.region_code, period = EXCLUDED.period, payload = EXCLUDED.payload "
+                        "WHERE observations.file_id IS NULL",
+                        [(report_id, o.obs_id, user_id, o.indicator_code, o.region_code, o.period,
+                          Jsonb(o.model_dump(mode="json"))) for o in observations])
+        return len(observations)
+
     def list_for_report(self, user_id: str, report_id: str) -> list[Observation]:
         """The user's observations in a report (stable order)."""
         with self.pool.connection() as c:
             rows = c.execute("SELECT payload FROM observations WHERE report_id = %s AND user_id = %s "
                              "ORDER BY indicator_code, region_code, period, obs_id",
                              (_uuid(report_id), user_id)).fetchall()
+        return [Observation.model_validate(r["payload"]) for r in rows]
+
+    def list_for_series(self, user_id: str, report_id: str, indicator_codes: list[str],
+                        region: str) -> list[Observation]:
+        """The user's observations of some indicator codes in one region of a report (stable order)."""
+        with self.pool.connection() as c:
+            rows = c.execute("SELECT payload FROM observations WHERE report_id = %s AND user_id = %s "
+                             "AND indicator_code = ANY(%s) AND region_code = %s "
+                             "ORDER BY indicator_code, region_code, period, obs_id",
+                             (_uuid(report_id), user_id, list(indicator_codes), region)).fetchall()
         return [Observation.model_validate(r["payload"]) for r in rows]
 
 
