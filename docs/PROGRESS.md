@@ -8,8 +8,8 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ```state
 milestone: M7a (M1–M6 merged)
 task: 1-6
-task_title: M7a LangGraph graph core — developer running
-phase: implementing
+task_title: M7a LangGraph graph core — in review
+phase: reviewing
 branch: m7-graph
 base_commit: f81aa17
 last_verified_commit: f81aa17
