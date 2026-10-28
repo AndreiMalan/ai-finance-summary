@@ -103,3 +103,39 @@ Rationale: M2 final review — identical rows add no information and would doubl
 
 ## D-028 — HICP series: `prc_hicp_minr` replaces discontinued `prc_hicp_manr`
 2026-10-26 · Eurostat discontinued `prc_hicp_manr` (last data 2025-12). The catalog's `HICP_YOY` uses `prc_hicp_minr` with `coicop18=TOTAL` (verified live during M3). `IND_PROD` additionally pins `indic_bt=PRD`. Supersedes the dataset code in D-005 / spec AC 8.
+
+## D-029 — Structured output uses `function_calling` by default
+2026-10-29 · `with_structured_output(ReportDraft, include_raw=True, method=LLM_STRUCTURED_OUTPUT_METHOD)` defaults to `function_calling` (a forced, non-strict tool call parsed by `PydanticToolsParser`). `json_schema` stays selectable, but `.env.example` warns that OpenAI strict mode will likely reject it.
+Rationale: langchain-openai's `json_schema` path hands the Pydantic class to OpenAI strict structured outputs, and strict schemas reject the `minLength` constraints that `ReportDraft` carries (claim ids, texts, units, ref ids). The offline fake-model tests exercise the same parser path as production.
+
+## D-030 — `LLM_TEMPERATURE` is ignored for gpt-5 reasoning models
+2026-10-29 · The default model stays `gpt-5-mini` (verified in the installed openai 3.39 and langchain-openai 1.7.2 model lists). langchain-openai drops any non-default temperature for `gpt-5*` models except `-chat` models and `reasoning_effort="none"`. The factory logs one info line when that happens. Setting `LLM_MODEL` to a chat model makes `LLM_TEMPERATURE=0.2` effective.
+Rationale: the provider accepts only the default temperature for reasoning models; logging the drop makes it visible instead of silent.
+
+## D-031 — LLM-layer signatures take Settings; citation ids
+2026-10-29 · The chain builders are `build_draft_chain(model, settings)`, `build_revise_chain(model, settings)` and `build_review_revise_chain(model, settings)`, so they can read the structured-output method. `build_tools(store, metrics, catalog, user_id, settings, *, series_meta=None, row_budget=None)`. Citation ids are fixed as follows:
+- a retrieved passage is cited by its document `doc_id`, with section/page in `Citation.locator`;
+- an upload is cited by its `file_id`, with the worksheet in `locator`;
+- an API series is cited by its `series_id`, with the query URL in `locator`.
+
+`Section.citation_ids` refer to `Citation.ref_id`. Other new settings: `LLM_MAX_TOOL_STEPS=6`, `MAX_TOOL_ROWS_PER_TURN=400` (rows across all `query_observations` calls of one tool loop, AC 35), `PROMPT_MAX_METRICS=80` and `PROMPT_MAX_PASSAGES=8`. `run_events.id` is a `bigint` identity column, which gives a stable order.
+Rationale: no hardcoded tunables; one stable id per source makes citations resolvable in the UI and exports.
+
+## D-032 — Unknown-column guard is stricter than the plan
+2026-10-29 · `check_unknown_columns(draft, undocumented, store)` enforces three rules:
+1. every undocumented column is listed in `unknown_columns_acknowledged`;
+2. a sentence that names such a column must state that its meaning is not documented, and must not use interpretive verbs (shows, indicates, reflects, …);
+3. no claim may name the column or cite an observation read from it.
+
+The `ObservationStore` is a required argument, so rule 3 cannot be switched off by omission.
+Rationale: AC 34 and ESMB Guidelines §4.4 forbid interpreting undocumented variables; "not documented, but signals X" is still an interpretation.
+
+## D-033 — When prose "names" an undocumented column
+2026-10-29 · Identifier-like headers (containing `_`, a digit, or a capital after a lower-case letter, e.g. `val_adj_x`, `Q17`, `valAdj`) are named by an exact, case-sensitive, whole-identifier match. Any header is also named when it is quoted or back-ticked exactly ('Total', "Total", `Total`, “Total”). Bare occurrences of common-word headers ("Total", "source", "unit", "LAST UPDATE") never fail a draft; for those columns the acknowledgement and provenance rules apply.
+Rationale: M6 review I1. Common-word headers made ordinary prose ("Total employment…", "Source: Eurostat.") fail every revision, which pushed legitimate reports into the safe failure.
+
+## D-034 — The daily LLM cap is attached to the model and counted once per call
+2026-10-29 · `get_chat_model(settings, *, cap_guard, callbacks=None)` takes `cap_guard` as a required keyword. Application code passes `daily_llm_cap_guard(pool, settings, user_id)`. Only tests and admin scripts may pass `None`. The guard is attached to the model as an `LLMCapCallbackHandler`, so every call is counted against the global `DAILY_LLM_CALL_CAP`, even when the caller passes no callbacks.
+
+`DailyLLMCap` de-duplicates by `run_id`. A run-events handler that shares the same cap (so it can log a blocked call as `llm_error`) therefore never counts a call twice, and a blocked run stays blocked. Provider-internal retries (`LLM_MAX_RETRIES`) are part of one counted call. A failing cap check (database down) fails closed and is logged as `llm_error` with the exception type.
+Rationale: M6 review I2. An opt-in cap on each call site could be forgotten (uncapped spend) or attached twice (double counting).
