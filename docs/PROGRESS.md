@@ -6,16 +6,16 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M6 (M1–M5 merged)
+milestone: M7a (M1–M6 merged)
 task: 1-6
-task_title: M6 LLM layer — fixing review I1, I2 + 3 minors
-phase: fixing
-branch: m6-llm
-base_commit: 7d53991
-last_verified_commit: 6b36162
-plan: docs/superpowers/plans/2026-10-27-m6-llm-layer.md
-next_action: M6 reviewed 8/10 (D:/AI_Finance_summary-m6/.superpowers/sdd/m6-review.md); developer fixing I1 guard common-word names, I2 structural daily cap, + fencing, guard store required, tool row budget, D-029+. Then merge m6-llm into main, full suite, push; then M7a per docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md (worktree D:/AI_Finance_summary-m7, branch m7-graph).
-updated: 2026-10-27
+task_title: M7a LangGraph graph core — developer running
+phase: implementing
+branch: m7-graph
+base_commit: f81aa17
+last_verified_commit: f81aa17
+plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
+next_action: M7a developer running in worktree D:/AI_Finance_summary-m7 (branch m7-graph). When it reports: single Opus review, fixes, then M7b (tasks 7–10) on the same branch, review, merge into main, full suite, push. Then M8 web UI plan.
+updated: 2026-10-29
 ```
 
 Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next task) … → `merging` → `done`.
@@ -36,7 +36,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
-| M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | 🔄 review 8/10 — fixing |
+| M7 LangGraph | D:/AI_Finance_summary-m7 | m7-graph | f81aa17 | 🔄 M7a developer running |
+| M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | ✅ merged to main (1045 tests) |
 | M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | ed3017e | ✅ merged to main (961 tests) |
 
 Resume rule: for each stream, check its branch log + uncommitted files in its worktree (`git -C <worktree> status`). Merge order: m2-ingestion → main, then rebase/merge m3 and m5 onto main (migrations 003/004 are distinct).
