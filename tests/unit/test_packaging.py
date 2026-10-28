@@ -68,3 +68,10 @@ def test_app_entrypoint_imports(monkeypatch):
         assert module.app.state.runtime_holder._runtime is None
     finally:
         get_settings.cache_clear()
+
+
+def test_reportlab_is_a_pinned_runtime_dependency():
+    """PDF export runs in production: reportlab is pinned in requirements.txt and not duplicated in dev."""
+    assert any(r.startswith("reportlab==") for r in _requirements())
+    dev = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").splitlines()
+    assert not any(ln.strip().startswith("reportlab") for ln in dev)
