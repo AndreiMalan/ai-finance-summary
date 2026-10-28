@@ -180,4 +180,4 @@ def test_chains_build_with_real_openai_model_offline():
 
     for method in ("function_calling", "json_schema"):
         s = make_settings(openai_api_key="sk-dummy", llm_structured_output_method=method)
-        assert build_draft_chain(get_chat_model(s), s) is not None
+        assert build_draft_chain(get_chat_model(s, cap_guard=None), s) is not None

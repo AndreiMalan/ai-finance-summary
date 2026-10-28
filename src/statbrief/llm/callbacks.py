@@ -11,14 +11,19 @@ Redaction: never prompt or response text, argument values, tool outputs, retriev
 exception messages (provider errors may echo keys or data). With LOG_PROMPTS on (debug), prompt and
 response text and the retrieval query are added; events are only readable by the report owner.
 
-Before every model call the optional `cap_guard` runs (normally `daily_llm_cap_guard`, which counts the
-call against DAILY_LLM_CALL_CAP across all users). `raise_error = True` lets its `LimitExceeded` abort the
-call; the model is never reached. Failures to WRITE events are logged and swallowed: observability never
-breaks a report run.
+Daily cap (structural, review I2): `get_chat_model(settings, cap_guard=...)` attaches an
+`LLMCapCallbackHandler` to the model itself, so every call of a factory-built model is counted against
+DAILY_LLM_CALL_CAP (global) whether or not the caller passes callbacks. The run-events handler may share
+the same `DailyLLMCap` to log a blocked call as llm_error; `DailyLLMCap` de-duplicates by run_id, so one
+model call is counted exactly once however many handlers check it. `raise_error = True` lets the cap's
+exception abort the call before the provider is reached. Failures to WRITE events are logged and
+swallowed: observability never breaks a report run.
 """
 import json
 import logging
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -50,14 +55,73 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Memory bound of the run_id de-duplication window. The handlers of one model call fire back to back, so
+# only recent run ids matter; this is not a tunable.
+_SEEN_RUNS_MAX = 1024
+
+
+class DailyLLMCap:
+    """Counts each model run (run_id) exactly once against a budget; repeated checks of a run are no-ops.
+
+    `consume_one` records one call or raises (LimitExceeded when the budget is spent). A run that was
+    blocked stays blocked: re-checking it re-raises the same error without consuming again.
+    """
+
+    def __init__(self, consume_one: Callable[[], None]) -> None:
+        """Wrap the function that consumes one call."""
+        self._consume = consume_one
+        self._seen: OrderedDict[UUID, BaseException | None] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def check(self, run_id: UUID) -> None:
+        """Consume one call for `run_id` the first time it is seen; raise if the cap blocked it."""
+        with self._lock:
+            if run_id in self._seen:
+                err = self._seen[run_id]
+                if err is not None:
+                    raise err
+                return
+            try:
+                self._consume()
+            except BaseException as exc:
+                self._remember(run_id, exc)
+                raise
+            self._remember(run_id, None)
+
+    def _remember(self, run_id: UUID, err: BaseException | None) -> None:
+        """Record a run's outcome, keeping only the most recent runs."""
+        self._seen[run_id] = err
+        while len(self._seen) > _SEEN_RUNS_MAX:
+            self._seen.popitem(last=False)
+
+
 def daily_llm_cap_guard(pool: ConnectionPool, settings: Settings, user_id: str, *,
-                        now: Callable[[], datetime] = _utc_now) -> Callable[[], None]:
-    """A guard that records one LLM call against the global daily cap, or raises LimitExceeded."""
-    def guard() -> None:
+                        now: Callable[[], datetime] = _utc_now) -> DailyLLMCap:
+    """A DailyLLMCap recording each LLM call against the global daily cap, or raising LimitExceeded."""
+    def consume_one() -> None:
         """Consume one call of today's (UTC) global budget."""
         t = now()
         consume(pool, user_id, KIND_LLM_CALL, settings.daily_llm_call_cap, utc_midnight(t), t, scope="global")
-    return guard
+    return DailyLLMCap(consume_one)
+
+
+class LLMCapCallbackHandler(BaseCallbackHandler):
+    """Model-level callback that checks the daily cap before every model call (attached by get_chat_model)."""
+
+    raise_error = True  # the cap's exception must abort the call
+    run_inline = True
+
+    def __init__(self, cap: DailyLLMCap) -> None:
+        """Bind to a cap."""
+        self.cap = cap
+
+    def on_chat_model_start(self, serialized: dict, messages: list, *, run_id: UUID, **kwargs: Any) -> None:
+        """Count (or block) this chat-model call."""
+        self.cap.check(run_id)
+
+    def on_llm_start(self, serialized: dict, prompts: list[str], *, run_id: UUID, **kwargs: Any) -> None:
+        """Count (or block) this text-model call."""
+        self.cap.check(run_id)
 
 
 def _model_name(serialized: dict | None, kwargs: dict, metadata: dict | None) -> str | None:
@@ -122,7 +186,7 @@ class RunEventsCallbackHandler(BaseCallbackHandler):
     run_inline = True  # keep events in call order
 
     def __init__(self, sink: RunEventSink, *, user_id: str, report_id: str, settings: Settings,
-                 cap_guard: Callable[[], None] | None = None, clock: Callable[[], float] = time.perf_counter,
+                 cap_guard: DailyLLMCap | None = None, clock: Callable[[], float] = time.perf_counter,
                  now: Callable[[], datetime] = _utc_now) -> None:
         """Bind to a sink, the run's owner and report, and an optional cap guard."""
         self.sink, self.user_id, self.report_id = sink, user_id, report_id
@@ -164,10 +228,14 @@ class RunEventsCallbackHandler(BaseCallbackHandler):
         base = {k: meta[k] for k in ("prompt_template", "prompt_variables") if k in meta}
         if self.cap_guard is not None:
             try:
-                self.cap_guard()
+                self.cap_guard.check(run_id)
             except LimitExceeded as exc:
                 self._write(RunEvent(kind="llm_error", name=name, model=model, ts=self.now(), detail={
                     "error_type": "LimitExceeded", "limit": exc.limit, "scope": exc.scope}))
+                raise
+            except Exception as exc:  # cap infrastructure failure: fail closed, but leave a trace
+                self._write(RunEvent(kind="llm_error", name=name, model=model, ts=self.now(),
+                                     detail={"error_type": type(exc).__name__}))
                 raise
         detail = {**base, "messages": len(texts)}
         if self.log_prompts:

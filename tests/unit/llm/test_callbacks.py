@@ -9,7 +9,8 @@ from langchain_core.messages import AIMessage
 
 from statbrief.auth.limits import LimitExceeded
 from statbrief.auth.users import create_user
-from statbrief.llm.callbacks import RunEventsCallbackHandler, daily_llm_cap_guard
+from statbrief.llm import models
+from statbrief.llm.callbacks import DailyLLMCap, RunEventsCallbackHandler, daily_llm_cap_guard
 from statbrief.llm.chains import PassageRetriever, build_context_chain, build_draft_chain
 from statbrief.llm.prompts import render_context, source_infos
 from statbrief.llm.tools import build_tools
@@ -168,13 +169,39 @@ def test_cap_guard_called_before_each_model_call():
 
     sink, settings = MemorySink(), make_settings()
     model = ToolFakeChatModel(messages=scripted(AIMessage(content="one"), AIMessage(content="two")))
-    h = _handler(sink, settings, cap_guard=guard)
+    h = _handler(sink, settings, cap_guard=DailyLLMCap(guard))
     assert model.invoke("a", config={"callbacks": [h]}).content == "one"
     with pytest.raises(LimitExceeded):
         model.invoke("b", config={"callbacks": [h]})
     assert sink.kinds() == ["llm_start", "llm_end", "llm_error"]
     assert sink.of("llm_error")[0].detail == {"error_type": "LimitExceeded", "limit": 1, "scope": "global"}
     assert next(model.messages).content == "two"  # the second reply was never consumed
+
+
+def test_cap_infrastructure_error_logged_and_raised():
+    """M6: a failing cap check (e.g. the database is down) fails closed and is logged as llm_error."""
+    def guard():
+        raise TimeoutError("pool timeout")
+
+    sink = MemorySink()
+    model = ToolFakeChatModel(messages=scripted(AIMessage(content="one")))
+    with pytest.raises(TimeoutError):
+        model.invoke("a", config={"callbacks": [_handler(sink, cap_guard=DailyLLMCap(guard))]})
+    assert sink.kinds() == ["llm_error"] and sink.of("llm_error")[0].detail == {"error_type": "TimeoutError"}
+
+
+def test_cap_counts_each_run_once_even_when_attached_twice():
+    """I2: model-level cap + a run-events handler sharing the cap count one call once."""
+    from statbrief.llm.callbacks import LLMCapCallbackHandler
+
+    calls = []
+    cap = DailyLLMCap(lambda: calls.append(1))
+    model = ToolFakeChatModel(messages=scripted(AIMessage(content="one"), AIMessage(content="two")),
+                              callbacks=[LLMCapCallbackHandler(cap)])
+    model.invoke("a")
+    model.invoke("b", config={"callbacks": [_handler(MemorySink(), cap_guard=cap),
+                                            LLMCapCallbackHandler(cap)]})
+    assert len(calls) == 2
 
 
 def test_node_events_recorded():
@@ -242,3 +269,29 @@ def test_daily_cap_enforced_with_postgres_counter(db):
     assert exc.value.scope == "global" and exc.value.limit == 2
     kinds = [r["kind"] for r in RunEventRepo(pool).list_for_report(alice.id, rid)]
     assert kinds.count("llm_end") == 2 and kinds[-1] == "llm_error"
+
+
+def _llm_calls(pool) -> int:
+    """Rows in usage_events for LLM calls."""
+    with pool.connection() as c:
+        return c.execute("SELECT count(*) AS n FROM usage_events WHERE kind = 'llm_call'").fetchone()["n"]
+
+
+def test_factory_model_is_capped_without_config_callbacks(db, monkeypatch):
+    """I2: a model from get_chat_model is capped and counted once per call, with or without run handlers."""
+    pool, alice, _, rid = db
+    settings = make_settings(openai_api_key="sk-test", daily_llm_call_cap=2)
+    fixed = datetime(2026, 10, 27, 9, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(models, "init_chat_model", lambda model, **kw: ToolFakeChatModel(
+        messages=scripted(*[AIMessage(content=str(i)) for i in range(3)]), callbacks=kw["callbacks"]))
+    cap = daily_llm_cap_guard(pool, settings, alice.id, now=lambda: fixed)
+    model = models.get_chat_model(settings, cap_guard=cap)
+    model.invoke("no config callbacks at all")
+    assert _llm_calls(pool) == 1
+    h = RunEventsCallbackHandler(RunEventRepo(pool), user_id=alice.id, report_id=rid, settings=settings,
+                                 cap_guard=cap)
+    model.invoke("with run events", config={"callbacks": [h]})
+    assert _llm_calls(pool) == 2
+    with pytest.raises(LimitExceeded):
+        model.invoke("over the cap")
+    assert _llm_calls(pool) == 2

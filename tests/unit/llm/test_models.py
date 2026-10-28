@@ -21,7 +21,7 @@ def test_llm_settings_defaults():
 def test_missing_key_raises_not_configured():
     """Without OPENAI_API_KEY the factory refuses (callers show a friendly message)."""
     with pytest.raises(LLMNotConfigured):
-        get_chat_model(make_settings())
+        get_chat_model(make_settings(), cap_guard=None)
 
 
 def test_provider_and_model_read_from_settings(monkeypatch):
@@ -36,7 +36,7 @@ def test_provider_and_model_read_from_settings(monkeypatch):
     s = make_settings(openai_api_key="sk-test", llm_model="gpt-x-mini", llm_temperature=0.5,
                       llm_timeout_s=12, llm_max_retries=1)
     marker = object()
-    m = get_chat_model(s, callbacks=[marker])
+    m = get_chat_model(s, cap_guard=None, callbacks=[marker])
     assert isinstance(m, BaseChatModel)
     assert seen["model"] == "openai:gpt-x-mini"
     kw = seen["kwargs"]
@@ -47,7 +47,7 @@ def test_provider_and_model_read_from_settings(monkeypatch):
 
 def test_real_openai_model_constructed_offline():
     """With a (dummy) key the real ChatOpenAI is built without any network call."""
-    m = get_chat_model(make_settings(openai_api_key="sk-dummy"))
+    m = get_chat_model(make_settings(openai_api_key="sk-dummy"), cap_guard=None)
     assert type(m).__name__ == "ChatOpenAI"
     assert m.model_name == "gpt-5-mini"
     assert "sk-dummy" not in repr(m)
@@ -72,3 +72,23 @@ def test_friendly_errors():
     msg = friendly_llm_error(LimitExceeded("llm_call", 500, "global"))
     assert "daily" in msg.lower() and "500" in msg
     assert friendly_llm_error(RuntimeError("sk-secret leaked")) == models.GENERIC_LLM_ERROR
+
+
+def test_cap_guard_is_a_required_keyword():
+    """I2: a call site must pass a cap guard (or an explicit None, tests/admin only)."""
+    with pytest.raises(TypeError):
+        get_chat_model(make_settings(openai_api_key="sk-dummy"))  # type: ignore[call-arg]
+
+
+def test_cap_guard_attached_at_model_level(monkeypatch):
+    """I2: the factory attaches the cap callback to the model itself, before any caller callbacks."""
+    from statbrief.llm.callbacks import DailyLLMCap, LLMCapCallbackHandler
+
+    seen = {}
+    monkeypatch.setattr(models, "init_chat_model", lambda model, **kw: seen.update(kw) or
+                        ToolFakeChatModel(messages=scripted(AIMessage(content="x"))))
+    cap = DailyLLMCap(lambda: None)
+    marker = object()
+    get_chat_model(make_settings(openai_api_key="sk-test"), cap_guard=cap, callbacks=[marker])
+    first, second = seen["callbacks"]
+    assert isinstance(first, LLMCapCallbackHandler) and first.cap is cap and second is marker

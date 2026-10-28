@@ -13,6 +13,7 @@ from langchain_core.language_models import BaseChatModel
 
 from statbrief.auth.limits import LimitExceeded
 from statbrief.config import Settings
+from statbrief.llm.callbacks import DailyLLMCap, LLMCapCallbackHandler
 from statbrief.rag.embeddings import make_embeddings
 
 GENERIC_LLM_ERROR = "The language model could not complete this step. Please try again later."
@@ -22,11 +23,15 @@ class LLMNotConfigured(RuntimeError):
     """No API key is configured for the selected LLM provider."""
 
 
-def get_chat_model(settings: Settings, *,
+def get_chat_model(settings: Settings, *, cap_guard: DailyLLMCap | None,
                    callbacks: Sequence[BaseCallbackHandler] | None = None) -> BaseChatModel:
-    """The configured chat model (temperature, timeout and retries from Settings).
+    """The configured chat model (temperature, timeout and retries from Settings), capped at model level.
 
-    Raises LLMNotConfigured when the provider's API key is missing.
+    `cap_guard` is required: application code passes `daily_llm_cap_guard(pool, settings, user_id)`, which
+    is attached to the model as an `LLMCapCallbackHandler`, so every call is counted against
+    DAILY_LLM_CALL_CAP even when the caller passes no callbacks (each call once, see DailyLLMCap). Only
+    tests and admin scripts may pass `cap_guard=None` (an uncapped model). Raises LLMNotConfigured when the
+    provider's API key is missing.
     """
     if settings.openai_api_key is None:
         raise LLMNotConfigured(f"no API key configured for LLM provider {settings.llm_provider!r}")
@@ -36,7 +41,8 @@ def get_chat_model(settings: Settings, *,
         timeout=settings.llm_timeout_s,
         max_retries=settings.llm_max_retries,
         api_key=settings.openai_api_key,
-        callbacks=list(callbacks) if callbacks is not None else None,
+        callbacks=([LLMCapCallbackHandler(cap_guard)] if cap_guard is not None else [])
+        + list(callbacks or []) or None,
     )
 
 
