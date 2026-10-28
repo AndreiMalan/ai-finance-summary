@@ -14,7 +14,7 @@ branch: m7-graph
 base_commit: f81aa17
 last_verified_commit: f81aa17
 plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7a developer running in worktree D:/AI_Finance_summary-m7 (branch m7-graph). When it reports: single Opus review, fixes, then M7b (tasks 7–10) on the same branch, review, merge into main, full suite, push. Then M8 web UI plan.
+next_action: M7a developer running in worktree D:/AI_Finance_summary-m7 (branch m7-graph). When it reports: single Opus review, fixes, then M7b (tasks 7–10) on the same branch, review, merge into main, full suite, push. M8 plan ready (2026-10-29-m8-web-ui.md); M9 plan ready, M9 tasks 1–4 running in parallel in D:/AI_Finance_summary-m9 (branch m9-finish).
 updated: 2026-10-29
 ```
 
@@ -36,6 +36,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
+| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 44a8a7d | 🔄 developer running (parallel to M7a) |
 | M7 LangGraph | D:/AI_Finance_summary-m7 | m7-graph | f81aa17 | 🔄 M7a developer running |
 | M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | ✅ merged to main (1045 tests) |
 | M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | ed3017e | ✅ merged to main (961 tests) |
