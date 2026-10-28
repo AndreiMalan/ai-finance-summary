@@ -1,4 +1,5 @@
-"""Contracts for the LLM-written report draft: numerical claims, citations, findings and sections (no I/O).
+"""Contracts for a report: its parameters, the LLM-written draft (numerical claims, citations, findings,
+sections) and the export status (no I/O).
 
 Shapes follow docs/architecture.md §2. Every number the draft states must be backed by a `NumericalClaim`
 that the deterministic verifier (`statbrief.analytics.verify`) recomputes from the cited observations.
@@ -6,7 +7,10 @@ that the deterministic verifier (`statbrief.analytics.verify`) recomputes from t
 import math
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from statbrief.domain.conflict import IndicatorLink
+from statbrief.domain.metrics import period_frequency
 
 
 class NumericalClaim(BaseModel):
@@ -80,3 +84,67 @@ class ReportDraft(BaseModel):
     def claim(self, claim_id: str) -> NumericalClaim | None:
         """The claim with this id, or None."""
         return next((c for c in self.claims if c.claim_id == claim_id), None)
+
+
+SourceMode = Literal["api", "upload", "combined"]
+ReportStyle = Literal["concise", "detailed"]
+ExportFormat = Literal["pdf", "xlsx"]
+
+
+class ReportParams(BaseModel):
+    """What one report covers: source mode, indicators, regions, period window, style and export formats.
+
+    `indicators` are catalog codes (fetched from the public APIs in "api"/"combined" mode) and/or indicator
+    codes of uploaded data; empty means every indicator found in the data. `regions` empty means every
+    region in the data (API modes need at least one). Periods are canonical ("2024", "2024-Q1", "2024-03"),
+    inclusive, share one frequency and are in order. `links` are the user's own statements that an
+    uploaded indicator code means a catalog indicator (never inferred); `consent_gap_fill` allows filling
+    gaps of linked uploaded series from API data (AC 22).
+    """
+
+    model_config = ConfigDict(frozen=True)
+    mode: SourceMode
+    indicators: list[str] = Field(default_factory=list)
+    regions: list[str] = Field(default_factory=list)
+    period_from: str | None = None
+    period_to: str | None = None
+    style: ReportStyle = "concise"
+    formats: list[ExportFormat] = Field(default_factory=lambda: ["pdf"])
+    consent_gap_fill: bool = False
+    links: list[IndicatorLink] = Field(default_factory=list)
+
+    @field_validator("indicators", "regions")
+    @classmethod
+    def _clean_codes(cls, v: list[str]) -> list[str]:
+        """Strip codes, reject blank ones and drop repeats (first occurrence kept)."""
+        out: list[str] = []
+        for code in v:
+            code = code.strip()
+            if not code:
+                raise ValueError("codes must not be blank")
+            if code not in out:
+                out.append(code)
+        return out
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "ReportParams":
+        """Canonical, ordered, same-frequency period bounds; API modes name at least one region."""
+        bounds = [p for p in (self.period_from, self.period_to) if p is not None]
+        freqs = {period_frequency(p) for p in bounds}  # ValueError for a non-canonical period
+        if len(freqs) > 1:
+            raise ValueError("period_from and period_to must have the same frequency")
+        if len(bounds) == 2 and self.period_from > self.period_to:  # type: ignore[operator]
+            raise ValueError("period_from must not be after period_to")
+        if self.mode != "upload" and not self.regions:
+            raise ValueError("API data needs at least one region")
+        return self
+
+
+class ExportStatus(BaseModel):
+    """State of the report export: requested formats, and the stored files once built (M9)."""
+
+    model_config = ConfigDict(frozen=True)
+    state: Literal["pending", "done", "failed"]
+    formats: list[ExportFormat]
+    requested_at: AwareDatetime
+    message: str | None = None
