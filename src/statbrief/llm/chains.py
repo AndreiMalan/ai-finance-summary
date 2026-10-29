@@ -80,7 +80,7 @@ def build_context_chain(retriever: BaseRetriever, settings: Settings) -> Runnabl
     """Request dict -> DRAFT_PROMPT variables.
 
     Input keys: query, regions, period, metrics, significant, sources, column_descriptions,
-    undocumented_columns. Retrieval and metric formatting run in parallel (RunnableParallel).
+    undocumented_columns, optionally skips (MetricSkip list). Retrieval and metric formatting run in parallel (RunnableParallel).
     """
     def _passages(docs: list[Document]) -> str:
         """Format the retrieved Documents as prompt passages."""
@@ -88,7 +88,7 @@ def build_context_chain(retriever: BaseRetriever, settings: Settings) -> Runnabl
 
     def _metrics(req: dict) -> dict[str, str]:
         """Format the metrics table and significance flags."""
-        return format_metrics(req["metrics"], req["significant"], settings)
+        return format_metrics(req["metrics"], req["significant"], settings, req.get("skips", ()))
 
     def _static(req: dict) -> dict[str, str]:
         """Format regions, period, sources and columns."""

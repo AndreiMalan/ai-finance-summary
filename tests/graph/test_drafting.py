@@ -153,3 +153,14 @@ def test_unknown_citation_is_revised(world):
     good["sections"][0]["citation_ids"] = ["UNEMP_RATE?test"]
     out = _run(world, fake_model(report_call(bad), report_call(good)))
     assert out["status"] == "awaiting_review" and out["revision_count"] == 1
+
+
+def test_metric_skips_reach_the_drafting_prompt(world):
+    """Re-review I4: the reasons for missing metrics are part of the prompt context."""
+    from statbrief.domain.metrics import MetricSkip
+    from statbrief.graph.drafting import prompt_context
+    state, _ = _setup(world)
+    state["metric_skips"] = [MetricSkip(kind="pp_change", indicator="UNEMP_RATE", region="RO", period="2023-06",
+                                        base_period="2023-05", reason="ambiguous: 2 observations for 2023-06")]
+    ctx = prompt_context(state, api_obs("UNEMP_RATE", "RO", UNEMP), world.deps())
+    assert "pp_change | UNEMP_RATE | RO | 2023-06 | ambiguous: 2 observations for 2023-06" in ctx["metric_skips"]

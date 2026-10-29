@@ -17,9 +17,9 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command, Overwrite, Send
 
-from statbrief.analytics.metrics import compute_metrics
+from statbrief.analytics.metrics import PERIODS_PER_YEAR, compute_metrics, shift_period
 from statbrief.analytics.significance import flag_significant as flag_changes
-from statbrief.domain.metrics import MetricResult, MetricSkip
+from statbrief.domain.metrics import MetricResult, MetricSkip, period_frequency
 from statbrief.domain.observation import Observation
 from statbrief.domain.report import ReportParams
 from statbrief.graph.deps import GraphDeps
@@ -48,6 +48,37 @@ def slice_view(view: ObservationView, indicator: str, region: str) -> Observatio
                                    "resolutions": {k: v for k, v in view.resolutions.items() if k in ids}})
 
 
+NO_WINDOW_DATA = "no observations in the report window"
+_STEP_KINDS = frozenset({"latest", "yoy", "mom", "qoq"})
+
+
+def is_step_metric(kind: str, period: str | None, base_period: str | None) -> bool:
+    """True for point and period-on-period kinds (latest, yoy, mom, qoq, and a pp_change over one period or
+    one year); False for window changes (abs_change, pct_change, pp_change from the window's first period)."""
+    if kind in _STEP_KINDS:
+        return True
+    if kind != "pp_change" or period is None or base_period is None:
+        return False
+    return base_period in (shift_period(period, -1), shift_period(period, -PERIODS_PER_YEAR[period_frequency(period)]))
+
+
+def report_metrics(obs: Sequence[Observation], indicator: str, region: str, period_from: str | None,
+                   period_to: str | None) -> tuple[list[MetricResult], list[MetricSkip]]:
+    """Metrics of one pair for the report (D-035): point and period-on-period metrics from all rows (the
+    look-back year provides year-ago bases), window changes from the rows inside the report window only,
+    so their base is the window's first period. A pair with no row in the window gets one skip."""
+    window = [o for o in obs if in_window(o.period, period_from, period_to)]
+    if not window:
+        return [], [MetricSkip(kind="latest", indicator=indicator, region=region, reason=NO_WINDOW_DATA)]
+    full, full_skips = compute_metrics(obs, indicator=indicator, region=region)
+    inside, inside_skips = compute_metrics(window, indicator=indicator, region=region)
+    metrics = ([m for m in full if is_step_metric(m.kind, m.period, m.base_period)]
+               + [m for m in inside if not is_step_metric(m.kind, m.period, m.base_period)])
+    skips = ([s for s in full_skips if is_step_metric(s.kind, s.period, s.base_period)]
+             + [s for s in inside_skips if not is_step_metric(s.kind, s.period, s.base_period)])
+    return metrics, skips
+
+
 def analyze_dispatch(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> Command:
     """Reset the metric lists and fan out one `analyze_one` per pair (or run `analyze_all`)."""
     view = view_from_state(state)
@@ -55,15 +86,16 @@ def analyze_dispatch(state: ReportState, deps: GraphDeps, config: RunnableConfig
     reset = {"metrics": Overwrite([]), "metric_skips": Overwrite([]), "status": "analyzing"}
     if not deps.settings.enable_parallel or not pairs:
         return Command(update=reset, goto="analyze_all")
-    return Command(update=reset, goto=[Send("analyze_one", AnalyzeTask(indicator=i, region=r,
-                                                                       view=slice_view(view, i, r)))
-                                       for i, r in pairs])
+    params = state["params"]
+    return Command(update=reset, goto=[Send("analyze_one", AnalyzeTask(
+        indicator=i, region=r, view=slice_view(view, i, r), period_from=params.period_from,
+        period_to=params.period_to)) for i, r in pairs])
 
 
 def analyze_one(task: AnalyzeTask, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
     """Metrics and recorded skips of one (indicator, region), from that slice of the database."""
     obs = load_effective(deps, task["view"], indicator=task["indicator"], region=task["region"])
-    results, skips = compute_metrics(obs, indicator=task["indicator"], region=task["region"])
+    results, skips = report_metrics(obs, task["indicator"], task["region"], task["period_from"], task["period_to"])
     return {"metrics": results, "metric_skips": skips}
 
 
@@ -72,8 +104,10 @@ def analyze_all(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> 
     obs = load_effective(deps, view_from_state(state))
     metrics: list[MetricResult] = []
     skips: list[MetricSkip] = []
-    for indicator, region in analysis_pairs(obs, state["params"]):
-        results, skipped = compute_metrics(obs, indicator=indicator, region=region)
+    params = state["params"]
+    for indicator, region in analysis_pairs(obs, params):
+        pair = [o for o in obs if o.indicator_code == indicator and o.region_code == region]
+        results, skipped = report_metrics(pair, indicator, region, params.period_from, params.period_to)
         metrics += results
         skips += skipped
     return {"metrics": metrics, "metric_skips": skips}

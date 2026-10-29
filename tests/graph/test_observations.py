@@ -136,3 +136,17 @@ def test_lookback_start_is_one_year_frequency_aware():
     assert (lookback_start("2024-03"), lookback_start("2024-Q2"), lookback_start("2024")) == \
         ("2023-03", "2023-Q2", "2023")
     assert lookback_start(None) is None
+
+
+# --- re-review I3: without consent, linked API data never fills periods inside the uploaded span (AC 22) ------
+
+def test_no_consent_api_does_not_fill_inside_the_uploaded_span():
+    """Inside [first, last] uploaded period an absent month stays absent; outside the span the API extends."""
+    raw = [_o("u1", "2024-01", 2.0), _o("u3", "2024-03", 2.2),
+           _o("a0", "2023-12", 1.9, ind="HICP", prov=API), _o("a2", "2024-02", 2.1, ind="HICP", prov=API),
+           _o("a4", "2024-04", 2.3, ind="HICP", prov=API)]
+    ids = [o.obs_id for o in effective_observations(raw, _view(links=LINK))]
+    assert ids == ["u1", "u3", "a0", "a4"]
+    filled = effective_observations(raw, _view(links=LINK, consent_gap_fill=True))
+    feb = [o for o in filled if o.period == "2024-02"]
+    assert len(feb) == 1 and feb[0].value == 2.1 and feb[0].obs_id != "a2"

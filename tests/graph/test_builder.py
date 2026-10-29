@@ -82,6 +82,8 @@ def test_happy_path_to_export(run, caplog):
         review = _to_review(world, script, graph, cfg)
         assert review["kind"] == "review" and review["verification"]["ok"] and review["error"] is None
         assert review["draft"]["claims"][0]["value"] == 0.6
+        skips = review["metric_skips"]  # re-review I4: the UI can show why metrics are missing
+        assert skips and {"kind", "indicator", "region", "period", "reason"} <= set(skips[0])
         out = graph.invoke(Command(resume={"action": "approve"}), cfg)
     assert "__interrupt__" not in out and out["status"] == "approved"
     assert out["export"].state == "pending" and out["export"].formats == ["pdf", "xlsx"]

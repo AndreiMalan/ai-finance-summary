@@ -9,7 +9,9 @@
 3. uploaded and API observations are combined through the user's indicator links (never inferred);
 4. with consent, gaps of linked uploaded series are filled from API data: the filled copy (its own "gapfill"
    id, API provenance) replaces both the uploaded point with a missing value and the API point it copies,
-   so a filled key has exactly one row;
+   so a filled key has exactly one row. Without consent, linked API rows inside the uploaded span that have
+   no upload row are left out (AC 22, `without_unconsented_gap_fills`); rows outside the span extend the
+   series the user selected;
 5. with `resolve=True`, the user's conflict resolutions are applied (UnresolvedConflicts when a conflict of
    these observations has none: analysis never runs on unresolved conflicts), and then every
    (indicator, region, period, unit, unit_multiplier) key is collapsed to exactly ONE row (D-036). Values
@@ -122,6 +124,35 @@ def collapse_duplicates(obs: Sequence[Observation],
     return [o for o in obs if o.obs_id in kept], corroborations
 
 
+def without_unconsented_gap_fills(uploads: Sequence[Observation], apis: Sequence[Observation],
+                                  view: ObservationView) -> list[Observation]:
+    """API rows minus those that would fill a gap of a linked uploaded series without consent (AC 22, D-036).
+
+    A linked API row is left out when its period lies inside the uploaded span of that series (first to last
+    uploaded period of the same indicator, region and frequency) and the upload has no row for it. API rows
+    outside the span (including the look-back year) extend the series the user selected and are kept; rows
+    that sit next to an upload row are kept too (they are only compared, which never needs consent).
+    """
+    renamed = {link.upload_code: link.catalog_code for link in view.links}
+    spans: dict[tuple[str, str, str], tuple[str, str]] = {}
+    present: set[tuple[str, str, str]] = set()
+    for o in uploads:
+        if o.indicator_code not in renamed:
+            continue
+        key = (renamed[o.indicator_code], o.region_code, o.frequency)
+        lo, hi = spans.get(key, (o.period, o.period))
+        spans[key] = (min(lo, o.period), max(hi, o.period))
+        present.add((renamed[o.indicator_code], o.region_code, o.period))
+    out = []
+    for a in apis:
+        span = spans.get((a.indicator_code, a.region_code, a.frequency))
+        inside = span is not None and span[0] <= a.period <= span[1]
+        if inside and (a.indicator_code, a.region_code, a.period) not in present:
+            continue
+        out.append(a)
+    return out
+
+
 def effective_set(raw: Sequence[Observation], view: ObservationView, *, resolve: bool = True) -> EffectiveSet:
     """Apply drops, the analysis window, links and consented gap filling; with `resolve`, also the
     resolutions and the one-row-per-key collapse (see the module docstring)."""
@@ -130,6 +161,8 @@ def effective_set(raw: Sequence[Observation], view: ObservationView, *, resolve:
             and in_window(o.period, view.period_from, view.period_to)]
     uploads = [o for o in kept if _is_upload(o)]
     apis = [o for o in kept if not _is_upload(o)]
+    if not view.consent_gap_fill:
+        apis = without_unconsented_gap_fills(uploads, apis, view)
     combined = combine(uploads, apis, view.links)
     filled, report = fill_gaps(uploads, apis, view.links, view.consent_gap_fill)
     replaced = ({f.replaced_obs_id for f in report.filled if f.replaced_obs_id}

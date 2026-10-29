@@ -100,7 +100,8 @@ def prompt_context(state: ReportState, observations: Sequence[Observation], deps
     return render_context(regions=regions, period=_period_text(state, metrics), metrics=metrics,
                           significant=state.get("significant") or [], sources=source_infos(observations),
                           passages=state.get("retrieved") or [], column_descriptions=column_descriptions(state),
-                          undocumented_columns=undocumented_columns(state), settings=deps.settings)
+                          undocumented_columns=undocumented_columns(state), settings=deps.settings,
+                          skips=state.get("metric_skips") or [])
 
 
 def supports_tools(model: BaseChatModel) -> bool:

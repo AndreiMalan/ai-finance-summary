@@ -64,6 +64,9 @@ SIGNIFICANT CHANGES (metric_id | magnitude | rule):
 - pp_change:UNEMP_RATE:RO:2024-01:2023-12 | 0.48 | rate_threshold
 - pp_change:HICP_YOY:RO:2024-03:2023-03 | 0.135802 | rate_threshold
 
+NOT COMPUTED (kind | indicator | region | period | reason; mention material gaps as caveats, never estimate them):
+(none)
+
 SOURCES (ref_id | kind | label | locator):
 - HICP_YOY|RO | api | eurostat series HICP_YOY|RO | https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/prc_hicp_minr
 - file-1 | upload | IRS_regional_monthly.xlsx | Date

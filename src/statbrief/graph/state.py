@@ -269,6 +269,7 @@ class DraftingInput(TypedDict, total=False):
     resolutions: dict[str, ConflictResolution]
     dropped_sources: list[str]
     metrics: list[MetricResult]
+    metric_skips: list[MetricSkip]
     significant: list[SignificantChange]
     retrieved: list[RetrievedPassage]
     draft: ReportDraft | None
@@ -313,3 +314,5 @@ class AnalyzeTask(TypedDict):
     indicator: str
     region: str
     view: ObservationView
+    period_from: str | None  # the report window (the view's window includes the look-back year)
+    period_to: str | None

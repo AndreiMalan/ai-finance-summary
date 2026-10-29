@@ -57,12 +57,14 @@ def _error_text(exc: Exception) -> str:
 
 def _review_value(state: ReportState, draft: ReportDraft, verification: VerificationResult | None,
                   error: str | None, deps: GraphDeps) -> dict[str, Any]:
-    """The JSON-ready interrupt value shown to the reviewer (draft, verification, citations, passages)."""
+    """The JSON-ready interrupt value shown to the reviewer: draft, verification, citations, passages, and the
+    metrics that were not computed with their reasons (e.g. "keep both" periods)."""
     passages = [{"doc_id": p.doc_id, "citation": p.citation(), "section": p.section, "page": p.page,
                  "source_type": p.source_type} for p in state.get("retrieved") or []]
     return {"kind": "review", "draft": draft.model_dump(mode="json"),
             "verification": verification.model_dump(mode="json") if verification is not None else None,
             "citations": [c.model_dump(mode="json") for c in draft.citations], "passages": passages,
+            "metric_skips": [s.model_dump(mode="json") for s in state.get("metric_skips") or []],
             "review_round": state.get("review_round") or 0, "max_rounds": deps.settings.max_revisions,
             "error": error}
 

@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     max_tool_rows_per_turn: int = Field(400, ge=1)  # rows all query_observations calls of one tool loop may return
     prompt_max_metrics: int = Field(80, ge=1)  # metrics listed in a prompt (significant ones first)
     prompt_max_passages: int = Field(8, ge=1)  # retrieved passages included in a prompt
+    prompt_max_skips: int = Field(40, ge=0)  # "not computed" metric lines in a prompt (reasons for gaps)
     log_prompts: bool = False  # debug: store prompt/response text in run_events (owner-only diagnostics)
 
     # LangGraph workflow (M7, D-011 toggles). The core path works with every ENABLE_* toggle off (AC 46).
