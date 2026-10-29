@@ -14,9 +14,10 @@ class Script:
         self.replies: list = []
 
     def stream(self):
-        """Hand out queued replies in order."""
+        """Hand out queued replies in order; a callable reply is built when the model is called."""
         while True:
-            yield self.replies.pop(0)
+            reply = self.replies.pop(0)
+            yield reply() if callable(reply) else reply
 
     def model(self) -> ToolFakeChatModel:
         """A tool-capable fake chat model reading this script."""

@@ -110,3 +110,30 @@ def test_invalid_params_and_no_pending_interrupt(app_client):
                        headers=H).status_code == 409
     evs = events(client.get(f"/api/reports/{rid}/run/stream"))
     assert [e["type"] for e in evs] == ["error"]
+
+
+def test_history_routes_scoped_disabled_and_fork(app_client, settings, tmp_path):
+    """History lists checkpoints; fork answers with the new checkpoint; 404 for others and when disabled."""
+    client, script = app_client
+    rid = _report(client)
+    _upload(client, rid, "irs.csv", long_csv(unemp_rows()))
+    client.put(f"/api/reports/{rid}/params", json=PARAMS, headers=H)
+    script.replies.append(lambda: report_call(draft_for(_metric(client, rid), "0.6")))
+    assert events(client.get(f"/api/reports/{rid}/run/stream"))[-1]["data"]["kind"] == "review"
+    entries = client.get(f"/api/reports/{rid}/history").json()
+    assert entries[0]["interrupt"] == "review" and entries[0]["has_draft"]
+    assert client.get(f"/api/reports/{rid}/history/{entries[0]['checkpoint_id']}/draft").json()["title"]
+    assert client.get(f"/api/reports/{rid}/history/nope/draft").status_code == 404
+    target = next(e for e in entries if e["next"] == ["drafting"])
+    assert client.post(f"/api/reports/{rid}/history/{target['checkpoint_id']}/fork").status_code == 403
+    forked = client.post(f"/api/reports/{rid}/history/{target['checkpoint_id']}/fork", headers=H)
+    assert forked.status_code == 200 and client.get(f"/api/reports/{rid}/history").json()[0]["checkpoint_id"] == \
+        forked.json()["checkpoint_id"]
+    client.post("/logout", headers=H)
+    client.cookies.clear()
+    client.post("/signup", data={"email": "other@example.com", "password": PW})
+    assert client.get(f"/api/reports/{rid}/history").status_code == 404
+    with _make_client(settings, tmp_path, enable_replay=False) as off:
+        off.post("/signup", data={"email": "third@example.com", "password": PW})
+        rid2 = _report(off)
+        assert off.get(f"/api/reports/{rid2}/history").status_code == 404

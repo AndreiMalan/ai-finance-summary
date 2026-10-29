@@ -23,10 +23,12 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from typing import Any, Literal
 
 from langgraph.types import Command
+from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
 from statbrief.auth.limits import KIND_REPORT_RUN, LimitExceeded, consume
@@ -78,20 +80,31 @@ def _start_input(user_id: str, report_id: str, params: dict[str, Any] | None) ->
     return {"report_id": report_id, "user_id": user_id, "params": ReportParams.model_validate(params)}
 
 
+@contextmanager
+def run_lock(pool: ConnectionPool, report_id: str) -> Iterator[bool]:
+    """Try the report's session advisory lock on a held pool connection; yields whether it was acquired.
+
+    Released on exit. Used by run segments and by forks (a fork never races a running segment).
+    """
+    with pool.connection() as conn:
+        got = conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS ok",
+                           (RUN_LOCK_NAMESPACE, report_id)).fetchone()["ok"]
+        try:
+            yield got
+        finally:
+            if got:
+                conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (RUN_LOCK_NAMESPACE, report_id))
+
+
 def run_segment(res: RunResources, user_id: str, report_id: str, *, params: dict[str, Any] | None,
                 take_resume: Callable[[], Any], budget_s: float,
                 clock: Callable[[], float] = time.monotonic) -> Iterator[SseEvent]:
     """Stream one segment of the report run (see the module docstring); never raises."""
-    with res.pool.connection() as lock_conn:
-        got = lock_conn.execute("SELECT pg_try_advisory_lock(%s, hashtext(%s)) AS ok",
-                                (RUN_LOCK_NAMESPACE, report_id)).fetchone()["ok"]
+    with run_lock(res.pool, report_id) as got:
         if not got:
             yield SseEvent(type="already_running", message="This report is already running in another tab.")
             return
-        try:
-            yield from _segment(res, user_id, report_id, params, take_resume, budget_s, clock)
-        finally:
-            lock_conn.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (RUN_LOCK_NAMESPACE, report_id))
+        yield from _segment(res, user_id, report_id, params, take_resume, budget_s, clock)
 
 
 def _segment(res: RunResources, user_id: str, report_id: str, params: dict[str, Any] | None,

@@ -12,6 +12,8 @@ M8 CSRF scheme replaces it.
   empty answer (a bare `{}` must never reach LangGraph). The answer is queued; the next stream segment
   resumes with it.
 - `GET  /api/preferences`: the user's saved report defaults (form pre-fill only, AC 43).
+- `GET  /api/reports/{id}/history`, `GET .../history/{checkpoint}/draft`, `POST .../history/{checkpoint}/fork`:
+  checkpoints, prior drafts and fork-from-checkpoint (AC 42); 404 when ENABLE_REPLAY is off.
 """
 from typing import Annotated, Any
 
@@ -25,7 +27,8 @@ from statbrief.graph.builder import graph_config
 from statbrief.graph.nodes_review import ReviewPayload
 from statbrief.graph.nodes_validate import ResolvePayload
 from statbrief.graph.preferences import PreferencesRepo
-from statbrief.graph.runner import run_segment
+from statbrief.graph.history import UnknownCheckpoint, fork_from, get_checkpoint_draft, list_checkpoints
+from statbrief.graph.runner import run_lock, run_segment
 from statbrief.graph.runtime import RunResources, make_store, state_graph
 from statbrief.storage.repos import ReportRepo
 from statbrief.web.deps import current_user, get_runtime
@@ -113,3 +116,49 @@ def preferences(user: UserDep, rt: RtDep) -> dict:
     """The user's saved report defaults (empty when none)."""
     prefs = PreferencesRepo(make_store(rt.pool)).get(user.id)
     return prefs.model_dump(mode="json") if prefs else {}
+
+
+def _replay_graph(request: Request, rt: Runtime, user: User, report_id: str):
+    """The model-free graph for the user's report; 404 when ENABLE_REPLAY is off or the report is foreign."""
+    if not rt.settings.enable_replay:
+        raise HTTPException(status_code=404, detail="history is disabled")
+    _own_report(rt, user, report_id)
+    res = _resources(request, rt)
+    return state_graph(res), res
+
+
+@router.get("/reports/{report_id}/history")
+def history(report_id: str, request: Request, user: UserDep, rt: RtDep) -> list[dict]:
+    """The report's checkpoints, newest first (AC 42)."""
+    graph, res = _replay_graph(request, rt, user, report_id)
+    return [c.model_dump(mode="json") for c in list_checkpoints(graph, report_id, res.settings)]
+
+
+@router.get("/reports/{report_id}/history/{checkpoint_id}/draft")
+def history_draft(report_id: str, checkpoint_id: str, request: Request, user: UserDep, rt: RtDep) -> dict:
+    """The draft stored in one checkpoint ({} when it has none); 404 for an unknown checkpoint."""
+    graph, res = _replay_graph(request, rt, user, report_id)
+    try:
+        draft = get_checkpoint_draft(graph, report_id, checkpoint_id, res.settings)
+    except UnknownCheckpoint:
+        raise HTTPException(status_code=404, detail="checkpoint not found") from None
+    return draft.model_dump(mode="json") if draft is not None else {}
+
+
+@router.post("/reports/{report_id}/history/{checkpoint_id}/fork", dependencies=[Guard])
+def fork(report_id: str, checkpoint_id: str, request: Request, user: UserDep, rt: RtDep) -> dict:
+    """Continue the report from an earlier checkpoint; the next stream segment runs from there.
+
+    409 while a segment is running (the fork takes the report's run lock); a queued answer for the old
+    branch's interrupt is dropped.
+    """
+    graph, res = _replay_graph(request, rt, user, report_id)
+    with run_lock(rt.pool, report_id) as got:
+        if not got:
+            raise HTTPException(status_code=409, detail="the report is running")
+        try:
+            new_id = fork_from(graph, report_id, checkpoint_id, res.settings)
+        except UnknownCheckpoint:
+            raise HTTPException(status_code=404, detail="checkpoint not found") from None
+        ReportRepo(rt.pool).take_pending_resume(user.id, report_id)
+    return {"checkpoint_id": new_id, "stream": f"/api/reports/{report_id}/run/stream"}
