@@ -14,7 +14,7 @@ branch: m7-graph
 base_commit: f81aa17
 last_verified_commit: f81aa17
 plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7 developer fixing M7a re-review I2 (window base), I3 (AC 22 gap-fill consent), I4 (skips to prompt/review), then implementing M7b (checkpointer, runner+SSE, history/replay, error routes). Then single review of M7b, fixes, merge m7-graph into main. M9 early (m9-finish) fixing review I1–I4 in parallel; merge after M7. M8 plan ready (2026-10-29-m8-web-ui.md).
+next_action: M7 developer fixing M7a re-review I2 (window base), I3 (AC 22 gap-fill consent), I4 (skips to prompt/review), then implementing M7b (checkpointer, runner+SSE, history/replay, error routes). Then single review of M7b, fixes, merge m7-graph into main. M9 tasks 1–4 merged to main. M8 plan ready (2026-10-29-m8-web-ui.md).
 updated: 2026-10-29
 ```
 
@@ -36,7 +36,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
-| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 44a8a7d | 🔄 review 8/10 — fixing I1–I4 (rounding, diacritics font, appendix split, blob sweep) |
+| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 44a8a7d | ✅ tasks 1–4 merged to main (1175 tests); tasks 5–7 after M8 |
 | M7 LangGraph | D:/AI_Finance_summary-m7 | m7-graph | f81aa17 | 🔄 M7a developer running |
 | M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | ✅ merged to main (1045 tests) |
 | M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | ed3017e | ✅ merged to main (961 tests) |
