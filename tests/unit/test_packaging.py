@@ -75,3 +75,12 @@ def test_reportlab_is_a_pinned_runtime_dependency():
     assert any(r.startswith("reportlab==") for r in _requirements())
     dev = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").splitlines()
     assert not any(ln.strip().startswith("reportlab") for ln in dev)
+
+
+def test_vercel_daily_cleanup_cron():
+    """vercel.json schedules the retention cleanup once a day (Hobby allows daily crons)."""
+    cfg = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
+    crons = cfg["crons"]
+    assert [c["path"] for c in crons] == ["/cron/cleanup"]
+    minute, hour, dom, month, dow = crons[0]["schedule"].split()
+    assert minute.isdigit() and hour.isdigit() and (dom, month, dow) == ("*", "*", "*")
