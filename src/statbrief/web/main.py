@@ -66,11 +66,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             body["demo_user"] = "misconfigured"
         return JSONResponse(body, status_code=200 if ok else 503)
 
-    from statbrief.web.routes import auth, diag, pages, uploads
+    from statbrief.web.routes import auth, diag, pages, run, uploads
 
     app.include_router(auth.router)
     app.include_router(pages.router)
     app.include_router(diag.router)
     app.include_router(uploads.router)
+    app.include_router(run.router)
+    app.state.run_resources_factory = run.default_run_resources
     uploads.install_error_handlers(app)
     return app

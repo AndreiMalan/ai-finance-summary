@@ -22,7 +22,7 @@ from statbrief.analytics.significance import flag_significant as flag_changes
 from statbrief.domain.metrics import MetricResult, MetricSkip, period_frequency
 from statbrief.domain.observation import Observation
 from statbrief.domain.report import ReportParams
-from statbrief.graph.deps import GraphDeps
+from statbrief.graph.deps import GraphDeps, emit_progress
 from statbrief.graph.observations import in_window, load_effective, view_from_state
 from statbrief.graph.state import AnalyzeTask, ObservationView, ReportState
 
@@ -94,6 +94,7 @@ def analyze_dispatch(state: ReportState, deps: GraphDeps, config: RunnableConfig
 
 def analyze_one(task: AnalyzeTask, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
     """Metrics and recorded skips of one (indicator, region), from that slice of the database."""
+    emit_progress("analyze_one", f"Computing metrics for {task['indicator']} in {task['region']}")
     obs = load_effective(deps, task["view"], indicator=task["indicator"], region=task["region"])
     results, skips = report_metrics(obs, task["indicator"], task["region"], task["period_from"], task["period_to"])
     return {"metrics": results, "metric_skips": skips}

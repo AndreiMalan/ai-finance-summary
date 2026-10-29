@@ -19,7 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from statbrief.domain.dataset import DatasetRef, DetectedSchema
-from statbrief.graph.deps import GraphDeps, node
+from statbrief.graph.deps import GraphDeps, emit_progress, node
 from statbrief.graph.observations import lookback_start
 from statbrief.graph.state import (ApiRequest, FetchTask, IngestionInput, IngestionOutput, ParseTask, ReportState,
                                    SourceMeta, WorkflowError)
@@ -112,6 +112,7 @@ def fetch_api(task: FetchTask, deps: GraphDeps, config: RunnableConfig) -> dict[
     if spec is None or spec.source not in deps.fetchers:
         return _failed_api(req, req.indicator, "unknown indicator or source")
     label = f"{spec.label} ({spec.source})"
+    emit_progress("fetch_api", f"Fetching {label}")
     cache = _RecordingCache(deps.api_cache)
     try:
         with deps.http_client() as client:
@@ -158,6 +159,7 @@ def _failed_file(ref: DatasetRef, message: str) -> dict[str, Any]:
 def parse_file(task: ParseTask, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
     """Read one uploaded file: its saved mapping, else a detected one with confidence (never raises, no rows)."""
     ref, s = task["ref"], deps.settings
+    emit_progress("parse_file", f"Reading {ref.filename}")
     stored = deps.mappings.get(task["user_id"], ref.file_id)
     if stored is not None:  # the user mapped it in the wizard: confirmed by definition
         meta = SourceMeta(source_id=ref.file_id, kind="upload", label=ref.filename, status="ok",

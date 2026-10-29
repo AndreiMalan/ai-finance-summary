@@ -85,3 +85,13 @@ def prepare_run(res: RunResources, user_id: str, report_id: str) -> PreparedRun:
     graph = build_graph(make_checkpointer(res.pool), make_store(res.pool), deps)
     return PreparedRun(graph=graph, config=graph_config(report_id, s, callbacks=[handler]), handler=handler,
                        deps=deps)
+
+
+def state_graph(res: RunResources) -> CompiledStateGraph:
+    """The report graph for reading or updating checkpoints only (status, resume validation, history, fork).
+
+    It has no model and no retriever, so it never needs an API key; it must never be streamed.
+    """
+    deps = GraphDeps.from_pool(res.pool, res.settings, blobs=res.blobs, chat_model=None, retriever=lambda q: [],
+                               http_client=res.http_client, now=res.now, sleep=res.sleep)
+    return build_graph(make_checkpointer(res.pool), make_store(res.pool), deps)

@@ -26,7 +26,7 @@ from statbrief.analytics.combine import detect_conflicts
 from statbrief.config import Settings
 from statbrief.domain.conflict import ConflictResolution, UnitMismatch
 from statbrief.domain.dataset import ColumnMapping, DatasetRef, Resolution, ValidationReport
-from statbrief.graph.deps import GraphDeps
+from statbrief.graph.deps import GraphDeps, emit_progress
 from statbrief.graph.observations import load_effective, load_effective_set, view_from_state
 from statbrief.graph.state import (BlockingIssues, FailedSource, PendingMapping, ReportState, ResolveRequest,
                                    WorkflowError)
@@ -166,6 +166,7 @@ def validate_normalize(state: ReportState, deps: GraphDeps, config: RunnableConf
     Anything else (a database outage, a bug) is recorded as a WorkflowError naming only the exception type,
     and `needs_input=None` routes the run to `fail_safe` instead of crashing the graph.
     """
+    emit_progress("validate_normalize", "Validating and combining the data")
     try:
         return _validate_all(state, deps)
     except Exception as exc:  # the type only: messages may echo data or connection strings

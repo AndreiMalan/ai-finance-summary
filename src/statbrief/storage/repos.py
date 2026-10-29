@@ -75,6 +75,39 @@ class ReportRepo:
             return c.execute("SELECT * FROM reports WHERE user_id = %s ORDER BY last_activity_at DESC, id",
                              (user_id,)).fetchall()
 
+    def set_params(self, user_id: str, report_id: str, params: dict[str, Any]) -> None:
+        """Store the run parameters (JSON) of the user's report; PermissionError for other users' reports."""
+        with self.pool.connection() as c:
+            row = c.execute("UPDATE reports SET params = %s, last_activity_at = now() WHERE id = %s AND user_id = %s "
+                            "RETURNING id", (Jsonb(params), _uuid(report_id), user_id)).fetchone()
+        if row is None:
+            raise PermissionError("report not owned by user")
+
+    def get_params(self, user_id: str, report_id: str) -> dict[str, Any] | None:
+        """The stored run parameters of the user's report, or None."""
+        row = self.get(user_id, report_id)
+        return row["params"] if row else None
+
+    def set_pending_resume(self, user_id: str, report_id: str, payload: Any) -> None:
+        """Queue a validated resume answer for the next run segment (replaces an earlier one)."""
+        with self.pool.connection() as c:
+            row = c.execute("UPDATE reports SET pending_resume = %s WHERE id = %s AND user_id = %s RETURNING id",
+                            (Jsonb(payload), _uuid(report_id), user_id)).fetchone()
+        if row is None:
+            raise PermissionError("report not owned by user")
+
+    def take_pending_resume(self, user_id: str, report_id: str) -> Any | None:
+        """Return and clear the queued resume answer atomically (None when there is none)."""
+        rid = _uuid(report_id)
+        if rid is None:
+            return None
+        with self.pool.connection() as c:
+            row = c.execute(
+                "UPDATE reports r SET pending_resume = NULL FROM (SELECT id, pending_resume FROM reports "
+                "WHERE id = %s AND user_id = %s FOR UPDATE) old WHERE r.id = old.id RETURNING old.pending_resume",
+                (rid, user_id)).fetchone()
+        return row["pending_resume"] if row else None
+
     def touch(self, user_id: str, report_id: str) -> None:
         """Record activity (drives retention, D-009); no-op for reports the user does not own."""
         with self.pool.connection() as c:

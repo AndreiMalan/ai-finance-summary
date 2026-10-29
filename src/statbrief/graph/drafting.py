@@ -41,7 +41,7 @@ from statbrief.domain.metrics import MetricResult
 from statbrief.domain.observation import Observation
 from statbrief.domain.report import ReportDraft
 from statbrief.domain.review import VerificationResult
-from statbrief.graph.deps import GraphDeps, node
+from statbrief.graph.deps import GraphDeps, emit_progress, node
 from statbrief.graph.observations import load_effective, view_from_state
 from statbrief.graph.state import DraftingInput, DraftingOutput, ReportState, WorkflowError
 from statbrief.llm.chains import (DRAFT_SCHEMA_NAME, DraftAttempt, attempt_from_tool_call, build_draft_chain,
@@ -166,6 +166,7 @@ def _report_data(state: ReportState, deps: GraphDeps) -> tuple[list[Observation]
 
 def draft(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
     """Write the first draft, or revise the current one from the reviewer's comment (request_changes)."""
+    emit_progress("draft", "Writing the draft")
     obs, store = _report_data(state, deps)
     context = prompt_context(state, obs, deps)
     review, previous = state.get("review"), state.get("draft")
@@ -183,6 +184,7 @@ def draft(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[s
 
 def revise(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
     """Rewrite the draft from the verifier's feedback; a parsed revision counts against MAX_REVISIONS."""
+    emit_progress("revise", f"Revising the draft ({(state.get('revision_count') or 0) + 1})")
     obs, store = _report_data(state, deps)
     variables = revise_inputs(prompt_context(state, obs, deps), state["draft"], state["verification"].feedback)
     attempt = generate("revise", variables, state, store, deps, config)
@@ -230,6 +232,7 @@ def verify(draft_: ReportDraft, store: ObservationStore, undocumented: set[str],
 
 def verify_claims(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
     """Verify the current draft against the report's observations and sources."""
+    emit_progress("verify_claims", "Checking every number against the data")
     obs, store = _report_data(state, deps)
     return {"verification": verify(state["draft"], store, undocumented_columns(state), citable_ids(state, obs))}
 

@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from statbrief.domain.metrics import parse_metric_id
-from statbrief.graph.deps import GraphDeps, node
+from statbrief.graph.deps import GraphDeps, emit_progress, node
 from statbrief.graph.state import RetrievalInput, RetrievalOutput, RetrievalState, SourceMeta, WorkflowError
 from statbrief.llm.chains import document_to_passage
 from statbrief.rag.api_metadata import SOURCE_TYPE, metadata_documents
@@ -88,6 +88,7 @@ def merge_passages(lists: Sequence[Sequence[RetrievedPassage]], cap: int) -> lis
 
 def retrieve_context(state: RetrievalState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
     """Retrieve passages for every query plus API metadata; a failing search is recorded, not raised."""
+    emit_progress("retrieve_context", "Searching the reference documents")
     lists: list[list[RetrievedPassage]] = []
     errors: list[WorkflowError] = []
     for query in state.get("queries") or []:

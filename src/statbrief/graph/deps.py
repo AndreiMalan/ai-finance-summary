@@ -17,6 +17,7 @@ from typing import Any, Protocol
 import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
+from langgraph.config import get_stream_writer
 from psycopg_pool import ConnectionPool
 
 from statbrief.config import Settings
@@ -81,3 +82,16 @@ def node(fn: NodeFn, deps: GraphDeps) -> Callable[[Any, RunnableConfig], Any]:
     bound.__name__ = bound.__qualname__ = fn.__name__
     bound.__doc__ = fn.__doc__
     return bound
+
+
+def emit_progress(node_name: str, message: str) -> None:
+    """Send a custom progress event to the stream (`stream_mode="custom"`, shown in the run timeline).
+
+    A no-op when the graph is not streamed or the code runs outside a graph (unit tests of a node).
+    `message` must hold no data values (it reaches the browser and logs).
+    """
+    try:
+        writer = get_stream_writer()
+    except RuntimeError:  # not inside a graph run
+        return
+    writer({"node": node_name, "message": message})
