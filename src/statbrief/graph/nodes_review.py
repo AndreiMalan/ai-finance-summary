@@ -17,16 +17,19 @@ exporters (M9) pick it up.
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.config import get_store
 from langgraph.graph import END
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from statbrief.analytics.store import ObservationStore
+from statbrief.domain.preferences import UserPreferences
 from statbrief.domain.report import ExportStatus, ReportDraft
 from statbrief.domain.review import ReviewDecision, VerificationResult
 from statbrief.graph.deps import GraphDeps
 from statbrief.graph.drafting import citable_ids, undocumented_columns, verify
 from statbrief.graph.observations import load_effective, view_from_state
+from statbrief.graph.preferences import PreferencesRepo
 from statbrief.graph.state import ReportState
 
 
@@ -115,7 +118,20 @@ def route_after_review(state: ReportState) -> Literal["drafting", "export", "__e
     return END
 
 
+def _save_preferences(state: ReportState) -> None:
+    """Remember the approved report's regions, indicators, style and formats in LangGraph's long-term store
+    (namespace ("prefs", user_id)); a graph compiled without a store skips this. Never used as data (AC 43)."""
+    try:
+        store = get_store()
+    except RuntimeError:  # not running inside a graph
+        return
+    if store is not None:
+        PreferencesRepo(store).save(state["user_id"], UserPreferences.from_params(state["params"]))
+
+
 def export(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
-    """M7 stub: record that the approved report awaits export in the requested formats (M9 builds them)."""
+    """Record that the approved report awaits export in the requested formats (M9 builds them) and save the
+    user's report defaults (long-term memory)."""
+    _save_preferences(state)
     return {"export": ExportStatus(state="pending", formats=list(state["params"].formats), requested_at=deps.now()),
             "status": "approved"}
