@@ -110,7 +110,7 @@ def build_irs_workbook(rng: random.Random) -> bytes:
         ws.append(HEADER)
         for r in rows:
             ws.append(r)
-    wb.properties.creator = "IRS (fictional issuer) - StatBrief demo data"
+    wb.properties.creator = "Institutul Român de Statistică (IRS)"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -144,7 +144,7 @@ def build_regional_json(rng: random.Random) -> bytes:
             records.append({"luna": month, "judet": county, "indicator": "SALARIATI",
                             "valoare": round(employees0[county] * (1 + 0.001 * i) + rng.uniform(-0.5, 0.5), 1),
                             "um": "mii persoane"})
-    doc = {"dataset": "REG_LUNAR", "issuer": "IRS (fictional issuer, StatBrief demo data)",
+    doc = {"dataset": "REG_LUNAR", "issuer": "Institutul Român de Statistică (IRS)",
            "exported": "2025-02-14", "records": records}
     return (json.dumps(doc, ensure_ascii=False, indent=1) + "\n").encode("utf-8")
 

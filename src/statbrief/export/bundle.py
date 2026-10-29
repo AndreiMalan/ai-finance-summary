@@ -241,7 +241,7 @@ def _example_bundle() -> ReportBundle:
             ResolvedCitation(kind="api", ref_id=series, label=citations[1].label,
                              source_label=f"Eurostat: {series}", url=url),
             ResolvedCitation(kind="reference", ref_id=citations[2].ref_id, label=citations[2].label,
-                             source_label="IRS (fictional issuer): Technical Note on Differences between IRS "
+                             source_label="IRS: Technical Note on Differences between IRS "
                                           "Regional Series and European Harmonised Series", locator="§3.1"),
         ],
         validation_exclusions=[ValidationExclusion(file_id=file_id, filename="IRS_regional_monthly_2023-2024.xlsx",
