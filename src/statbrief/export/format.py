@@ -1,14 +1,16 @@
 """Presentation helpers shared by the PDF and Excel builders: precision, number formatting, provenance text.
 
-Numbers are rounded only here, at presentation, with the precision the claim text states (a claim
+Numbers are rounded only here, at presentation, half-up like the verifier (D-010), with the precision the
+claim text states (a claim
 "fell to 6.4%" shows one decimal wherever its value appears). A number no claim states uses
 `ExportOptions.default_decimals`. Stored and exported raw values (Excel Data / Metrics sheets) stay unrounded.
 """
 import re
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 
 from statbrief.analytics.combine import source_label
+from statbrief.analytics.verify import round_half_up
 from statbrief.config import Settings
 from statbrief.domain.observation import ApiProvenance, Observation
 from statbrief.domain.report import NumericalClaim
@@ -64,8 +66,11 @@ def claim_decimals(claim: NumericalClaim) -> int | None:
 
 
 def format_number(value: float, decimals: int) -> str:
-    """Value rounded half-even to `decimals` places with "," thousands grouping ("-1,234.5")."""
-    q = Decimal(repr(value)).quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_EVEN)
+    """Value rounded half-up (the verifier's rule, D-010) to `decimals` places with "," grouping ("-1,234.5").
+
+    The same rule as `analytics.verify`, so a claim accepted as "2.3" for 2.25 also prints 2.3 here.
+    """
+    q = round_half_up(value, decimals)
     if q == 0:
         q = abs(q)  # never print "-0.0"
     return f"{q:,.{decimals}f}"

@@ -84,3 +84,14 @@ def test_vercel_daily_cleanup_cron():
     assert [c["path"] for c in crons] == ["/cron/cleanup"]
     minute, hour, dom, month, dow = crons[0]["schedule"].split()
     assert minute.isdigit() and hour.isdigit() and (dom, month, dow) == ("*", "*", "*")
+
+
+def test_pdf_fonts_are_bundled():
+    """The embedded DejaVu fonts and their licence ship in the package and are not excluded by vercel.json."""
+    fonts = ROOT / "src" / "statbrief" / "export" / "fonts"
+    for name in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "LICENSE"):
+        assert (fonts / name).is_file() and (fonts / name).stat().st_size > 0, name
+    excluded = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))["functions"]["app.py"]["excludeFiles"]
+    assert "src/statbrief/export" not in excluded and ".ttf" not in excluded and "fonts" not in excluded
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "export/fonts/*" in project["tool"]["setuptools"]["package-data"]["statbrief"]

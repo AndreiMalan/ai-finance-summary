@@ -31,11 +31,12 @@ def test_claim_decimals(text, value, expected):
 
 
 @pytest.mark.parametrize("value,decimals,expected", [
-    (6.45, 1, "6.4"), (6.55, 1, "6.6"), (1234567.891, 2, "1,234,567.89"), (-0.04, 1, "0.0"), (-7.8, 1, "-7.8"),
-    (2.0, 0, "2"),
+    (2.25, 1, "2.3"), (6.45, 1, "6.5"), (0.125, 2, "0.13"), (6.55, 1, "6.6"), (-2.25, 1, "-2.3"),
+    (1234567.891, 2, "1,234,567.89"), (-0.04, 1, "0.0"), (-7.8, 1, "-7.8"), (2.0, 0, "2"),
 ])
 def test_format_number(value, decimals, expected):
-    """Half-even rounding of the shortest decimal representation, grouped thousands, no negative zero."""
+    """Half-up rounding (ties away from zero, as the verifier, D-010) of the shortest decimal representation,
+    grouped thousands, no negative zero."""
     assert format_number(value, decimals) == expected
 
 

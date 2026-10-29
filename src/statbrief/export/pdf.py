@@ -12,7 +12,9 @@ document is built with reportlab's `invariant` mode, so the same bundle always y
 only timestamps printed are the bundle's own (`generated_at`, `approved_at`).
 """
 import io
+import threading
 from collections import defaultdict
+from pathlib import Path
 from xml.sax.saxutils import escape
 
 from reportlab.graphics.charts.legends import Legend
@@ -23,6 +25,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (KeepTogether, ListFlowable, ListItem, PageBreak, Paragraph, SimpleDocTemplate,
                                 Spacer, Table, TableStyle)
 
@@ -49,6 +53,23 @@ _SERIES_COLORS = (colors.HexColor("#1f6feb"), colors.HexColor("#d1495b"), colors
                   colors.HexColor("#e9a23b"), colors.HexColor("#6f42c1"), colors.HexColor("#6c757d"))
 _APPENDIX_COL_WIDTHS = (2.2 * cm, 2.2 * cm, 4.6 * cm, 7.0 * cm)
 _NONE = "None."
+# Embedded fonts with full Latin Extended coverage (Romanian ș ț ă î â, incl. cedilla forms ş ţ). The
+# built-in Type 1 Helvetica is WinAnsi-only and renders those as boxes. DejaVu Sans, vendored under
+# export/fonts/ with its LICENSE (Bitstream Vera / DejaVu terms permit redistribution).
+_FONT_DIR = Path(__file__).parent / "fonts"
+FONT, FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
+_FONT_FILES = {FONT: "DejaVuSans.ttf", FONT_BOLD: "DejaVuSans-Bold.ttf"}
+_font_lock = threading.Lock()
+
+
+def register_fonts() -> None:
+    """Register the embedded TTF fonts with reportlab once per process (idempotent, thread-safe)."""
+    with _font_lock:
+        registered = set(pdfmetrics.getRegisteredFontNames())
+        for name, filename in _FONT_FILES.items():
+            if name not in registered:
+                pdfmetrics.registerFont(TTFont(name, str(_FONT_DIR / filename)))
+        pdfmetrics.registerFontFamily(FONT, normal=FONT, bold=FONT_BOLD, italic=FONT, boldItalic=FONT_BOLD)
 
 
 def _p(text: str, style: ParagraphStyle) -> Paragraph:
@@ -57,12 +78,19 @@ def _p(text: str, style: ParagraphStyle) -> Paragraph:
 
 
 def _styles() -> dict[str, ParagraphStyle]:
-    """Paragraph styles used by the document."""
+    """Paragraph styles used by the document, all in the embedded fonts."""
     base = getSampleStyleSheet()
-    small = ParagraphStyle("Small", parent=base["BodyText"], fontSize=8, leading=10)
-    return {"title": base["Title"], "h1": base["Heading1"], "h2": base["Heading2"], "h3": base["Heading3"],
-            "body": base["BodyText"], "small": small,
-            "meta": ParagraphStyle("Meta", parent=base["BodyText"], fontSize=11, leading=15, spaceAfter=4)}
+
+    def font(style: ParagraphStyle, bold: bool = False, **kw) -> ParagraphStyle:
+        """A copy of `style` in the embedded (bold) font."""
+        return ParagraphStyle(f"SB{style.name}{len(kw)}", parent=style, fontName=FONT_BOLD if bold else FONT,
+                              bulletFontName=FONT, **kw)
+
+    body = font(base["BodyText"])
+    return {"title": font(base["Title"], bold=True), "h1": font(base["Heading1"], bold=True),
+            "h2": font(base["Heading2"], bold=True), "h3": font(base["Heading3"], bold=True), "body": body,
+            "small": font(base["BodyText"], fontSize=8, leading=10),
+            "meta": font(base["BodyText"], fontSize=11, leading=15, spaceAfter=4)}
 
 
 def _bullets(items: list[str], style: ParagraphStyle) -> list:
@@ -120,6 +148,8 @@ def _chart(unit: str, series: dict[str, dict[str, float]], max_series: int) -> D
     lc.categoryAxis.labels.angle = 45
     lc.categoryAxis.labels.boxAnchor = "ne"
     lc.categoryAxis.labels.fontSize = 6
+    lc.categoryAxis.labels.fontName = FONT
+    lc.valueAxis.labels.fontName = FONT
     lc.valueAxis.labels.fontSize = 7
     for i in range(len(chosen)):
         color = _SERIES_COLORS[i % len(_SERIES_COLORS)]
@@ -127,8 +157,9 @@ def _chart(unit: str, series: dict[str, dict[str, float]], max_series: int) -> D
         lc.lines[i].strokeWidth = 1.2
         lc.lines[i].symbol = makeMarker("FilledCircle", size=3, fillColor=color, strokeColor=color)
     d.add(lc)
-    d.add(String(_PLOT_X, plot_y + _PLOT_H + 8, f"Unit: {unit}", fontSize=7))
+    d.add(String(_PLOT_X, plot_y + _PLOT_H + 8, f"Unit: {unit}", fontSize=7, fontName=FONT))
     legend = Legend()
+    legend.fontName = FONT
     legend.x, legend.y = _PLOT_X, legend_top
     legend.fontSize, legend.columnMaximum, legend.dx, legend.dy = 6, len(chosen), 6, 6
     legend.deltay = _LEGEND_ROW_H
@@ -191,30 +222,41 @@ def _citations(bundle: ReportBundle, st: dict[str, ParagraphStyle]) -> list:
 
 
 def _appendix(bundle: ReportBundle, st: dict[str, ParagraphStyle], opts: ExportOptions) -> list:
-    """Every claim: rounded value, metric id, formula and its input observations with their sources."""
+    """Every claim: rounded value, metric id, formula and its input observations with their sources.
+
+    One table row per input observation (claim, value and formula only on the claim's first row), so a
+    claim citing hundreds of observations flows over pages instead of overflowing one; `splitInRow` also
+    lets a single tall row split.
+    """
     small = st["small"]
     rows = [[_p(h, small) for h in ("Claim", "Value", "Metric / formula", "Inputs (observation → source)")]]
+    first_rows: list[int] = []
     for claim in bundle.draft.claims:
         decimals = claim_decimals(claim)
         value = format_number(claim.value, opts.default_decimals if decimals is None else decimals)
         metric = bundle.metric(claim.metric_id) if claim.metric_id else None
         formula = f"{claim.metric_id}\n{metric.formula}" if metric else "direct observation (no metric)"
-        inputs = []
-        for oid in claim.observation_ids:
+        first_rows.append(len(rows))
+        for i, oid in enumerate(claim.observation_ids):
             obs = bundle.observation(oid)
-            inputs.append(f"{oid} → {observation_source(obs)}" if obs else oid)
-        rows.append([_p(claim.claim_id, small), _p(f"{value} {claim.unit}", small),
-                     Paragraph(escape(formula).replace("\n", "<br/>"), small),
-                     Paragraph("<br/>".join(escape(i) for i in inputs), small)])
-    table = Table(rows, colWidths=_APPENDIX_COL_WIDTHS, repeatRows=1)
-    table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.25, colors.grey), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                               ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee"))]))
+            source = _p(f"{oid} → {observation_source(obs)}" if obs else oid, small)
+            if i == 0:
+                rows.append([_p(claim.claim_id, small), _p(f"{value} {claim.unit}", small),
+                             Paragraph(escape(formula).replace("\n", "<br/>"), small), source])
+            else:
+                rows.append(["", "", "", source])
+    style = [("BOX", (0, 0), (-1, -1), 0.25, colors.grey), ("INNERGRID", (3, 0), (3, -1), 0.25, colors.lightgrey),
+             ("VALIGN", (0, 0), (-1, -1), "TOP"), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eeeeee"))]
+    style += [("LINEABOVE", (0, r), (-1, r), 0.25, colors.grey) for r in first_rows]
+    table = Table(rows, colWidths=_APPENDIX_COL_WIDTHS, repeatRows=1, splitInRow=1)
+    table.setStyle(TableStyle(style))
     return [PageBreak(), _p(APPENDIX, st["h1"]), table]
 
 
 def build_pdf(bundle: ReportBundle, options: ExportOptions | None = None) -> bytes:
     """Render the bundle as a PDF document (see module doc); deterministic for a given bundle."""
     opts = options or ExportOptions()
+    register_fonts()
     st = _styles()
     story = _cover(bundle, st)
     story += [_p(EXECUTIVE_SUMMARY, st["h1"]), *_bullets([f.headline for f in bundle.draft.executive_summary],

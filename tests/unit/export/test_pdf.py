@@ -77,3 +77,40 @@ def test_many_series_are_capped(monkeypatch):
     monkeypatch.setattr(pdf, "_chart", spy)
     build_pdf(ReportBundle.example(), ExportOptions(chart_max_series=1))
     assert seen and max(seen) == 1
+
+
+def _with_claim_value(value: float, text: str) -> ReportBundle:
+    """The example bundle whose first claim states `value` with `text`."""
+    data = ReportBundle.example().model_dump()
+    data["draft"]["claims"][0].update(value=value, text=text)
+    return ReportBundle.model_validate(data)
+
+
+def test_appendix_rounds_ties_like_the_verifier():
+    """A verified claim "2.3%" for 2.25 prints 2.3 in the appendix (half-up, never half-even 2.2)."""
+    text = _text(build_pdf(_with_claim_value(2.25, "Annual inflation in Cluj rose to 2.3%."))).replace(" ", "")
+    assert "2.3%" in text and "2.2%" not in text
+
+
+def test_romanian_diacritics_round_trip():
+    """ș ț ă î â (comma-below and cedilla forms) are embedded and extract unchanged (no black boxes)."""
+    words = ["Timiș", "Brașov", "Iași", "Constanța", "Statistică", "Român", "ăîâ", "Timiş", "Constanţa"]
+    data = ReportBundle.example().model_dump()
+    data["draft"]["title"] = "Prețuri în Timiș"
+    data["draft"]["sections"][0]["paragraphs"] = [" ".join(words)]
+    text = _text(build_pdf(ReportBundle.model_validate(data)))
+    for w in [*words, "Prețuri în Timiș"]:
+        assert w in text, w
+    assert "\u25a0" not in text
+
+
+def test_appendix_with_500_inputs_renders():
+    """A claim citing 500 observations no longer overflows a page (one table row per input)."""
+    b = ReportBundle.example()
+    base = b.observations[0]
+    many = [base.model_copy(update={"obs_id": f"obs_{i:04d}_" + "x" * 30}) for i in range(500)]
+    data = b.model_dump()
+    data["observations"] += [o.model_dump() for o in many]
+    data["draft"]["claims"][0]["observation_ids"] = [o.obs_id for o in many]
+    text = _text(build_pdf(ReportBundle.model_validate(data)))
+    assert "obs_0000_" in text and "obs_0499_" in text
