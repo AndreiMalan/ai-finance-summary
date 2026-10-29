@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     top_movers: int = Field(3, ge=0)  # largest |YoY| per indicator and period across >= 2 regions (0 = off)
     max_revisions: int = Field(3, ge=0)  # verify -> revise cycles before safe failure (D-010, AC 27)
     max_parse_retries: int = Field(2, ge=0)  # retries of an unparseable LLM draft (D-010)
+    max_model_retries: int = Field(1, ge=0)  # node-level retries of a failed model call (after LLM_MAX_RETRIES)
 
     # LLM layer (M6). The chat model is built with init_chat_model(f"{llm_provider}:{llm_model}").
     llm_provider: Literal["openai"] = "openai"

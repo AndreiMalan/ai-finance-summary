@@ -200,6 +200,8 @@ class ReportState(TypedDict, total=False):
     verification: VerificationResult | None
     revision_count: int
     parse_retry_count: int
+    model_retry_count: int  # consecutive failed model calls in drafting (MAX_MODEL_RETRIES)
+    last_generation: Literal["ok", "parse_error", "model_error"]  # outcome of the latest draft/revise call
     # review and export
     review: ReviewDecision | None
     review_round: int
@@ -284,6 +286,8 @@ class DraftingOutput(TypedDict, total=False):
     verification: VerificationResult | None
     revision_count: int
     parse_retry_count: int
+    model_retry_count: int
+    last_generation: Literal["ok", "parse_error", "model_error"]
     review: ReviewDecision | None
     errors: Annotated[list[WorkflowError], operator.add]
     status: Status

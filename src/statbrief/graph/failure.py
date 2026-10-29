@@ -14,12 +14,17 @@ from statbrief.graph.deps import GraphDeps
 from statbrief.graph.state import ReportState, WorkflowError
 
 NEEDS_ATTENTION = "needs_manual_attention"
+MODEL_ERROR_KINDS = frozenset({"llm_limit", "model_unavailable", "model_error"})
 
 
 def failure_reason(state: ReportState, settings: Settings) -> str:
     """Why the run is failing, from the counters and results in the state (most specific first)."""
     request = state.get("needs_input")
     verification = state.get("verification")
+    if state.get("last_generation") == "model_error":
+        model_errors = [e for e in state.get("errors") or [] if e.kind in MODEL_ERROR_KINDS]
+        message = model_errors[-1].message if model_errors else "The language model could not complete the draft."
+        return f"{message} The report needs manual attention."
     if (state.get("parse_retry_count") or 0) > settings.max_parse_retries:
         return (f"The model's draft could not be read after {settings.max_parse_retries + 1} attempts; "
                 "the report needs manual attention.")

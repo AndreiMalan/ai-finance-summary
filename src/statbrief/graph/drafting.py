@@ -18,11 +18,15 @@ source of this report, and every section citation id must be among the draft's c
 verification and are appended to the feedback.
 
 Bounds: an unparseable reply is retried while `parse_retry_count <= MAX_PARSE_RETRIES` (consecutive
-failures); a failed verification is revised while `revision_count < MAX_REVISIONS`. The sub-graph then ends;
+failures); a failed model call (provider error, timeout after LLM_MAX_RETRIES, network) is retried while
+`model_retry_count <= MAX_MODEL_RETRIES`, while the daily cap (LimitExceeded) or a missing model ends at
+once, with a friendly WorkflowError (AC 44); a failed verification is revised while
+`revision_count < MAX_REVISIONS`. The sub-graph then ends;
 the parent routes on the outcome (`route_after_drafting`): verified -> human review, otherwise the safe
 failure, which keeps the last draft and its verification feedback ("needs manual attention", AC 27).
 The counters start at zero on every entry (first draft, or each reviewer round).
 """
+import logging
 from collections.abc import Callable, Sequence
 from typing import Any, Literal
 
@@ -32,9 +36,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.runnables.config import merge_configs
 from langgraph.graph import END, START, StateGraph
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph.state import CompiledStateGraph
 
 from statbrief.analytics.store import ObservationStore
+from statbrief.auth.limits import LimitExceeded
 from statbrief.analytics.verify import verify_draft
 from statbrief.config import Settings
 from statbrief.domain.metrics import MetricResult
@@ -47,6 +53,7 @@ from statbrief.graph.state import DraftingInput, DraftingOutput, ReportState, Wo
 from statbrief.llm.chains import (DRAFT_SCHEMA_NAME, DraftAttempt, attempt_from_tool_call, build_draft_chain,
                                   build_review_revise_chain, build_revise_chain, build_structured_from_messages)
 from statbrief.llm.guards import check_unknown_columns
+from statbrief.llm.models import LLMNotConfigured, friendly_llm_error
 from statbrief.llm.prompts import (DRAFT_PROMPT, REVIEW_REVISE_PROMPT, REVISE_PROMPT, render_context,
                                    review_revise_inputs, revise_inputs, source_infos)
 from statbrief.llm.tools import build_tools, run_tool_loop
@@ -59,6 +66,7 @@ _PROMPTS: dict[str, tuple[ChatPromptTemplate, Callable[[BaseChatModel, Settings]
     "review_revise": (REVIEW_REVISE_PROMPT, build_review_revise_chain),
 }
 GUARD_HEADER = "Unknown-column rules (fix every item):"
+logger = logging.getLogger(__name__)
 
 
 class ModelUnavailable(RuntimeError):
@@ -148,14 +156,41 @@ def generate(mode: Mode, variables: dict[str, str], state: ReportState, store: O
 def _after_attempt(attempt: DraftAttempt, state: ReportState, node_name: str) -> dict[str, Any]:
     """State update for one attempt: a parsed draft replaces the old one (its verification is cleared);
     an unparseable one only counts as a parse failure (draft and verification stay consistent)."""
-    out: dict[str, Any] = {"draft_history": [attempt], "status": "drafting"}
+    out: dict[str, Any] = {"draft_history": [attempt], "status": "drafting", "model_retry_count": 0}
     if attempt.draft is None:
         out["parse_retry_count"] = (state.get("parse_retry_count") or 0) + 1
+        out["last_generation"] = "parse_error"
         out["errors"] = [WorkflowError(node=node_name, kind="parse_error", retryable=True,
                                        message=attempt.parse_error or "unparseable model output")]
         return out
-    out.update({"draft": attempt.draft, "verification": None, "parse_retry_count": 0})
+    out.update({"draft": attempt.draft, "verification": None, "parse_retry_count": 0, "last_generation": "ok"})
     return out
+
+
+# Errors no retry can fix: the daily cap, a missing key / model. Anything else from the model call (provider
+# errors, timeouts after LLM_MAX_RETRIES, network) is retried MAX_MODEL_RETRIES times.
+_FATAL_MODEL_ERRORS = (LimitExceeded, LLMNotConfigured, ModelUnavailable)
+
+
+def _model_failure(exc: Exception, state: ReportState, node_name: str, settings: Settings) -> dict[str, Any]:
+    """State update for a failed model call: a friendly WorkflowError (exception type logged only)."""
+    fatal = isinstance(exc, _FATAL_MODEL_ERRORS)
+    logger.warning("%s: model call failed (%s)", node_name, type(exc).__name__)
+    kind = "llm_limit" if isinstance(exc, LimitExceeded) else "model_unavailable" if fatal else "model_error"
+    count = settings.max_model_retries + 1 if fatal else (state.get("model_retry_count") or 0) + 1
+    return {"last_generation": "model_error", "model_retry_count": count, "status": "drafting",
+            "errors": [WorkflowError(node=node_name, kind=kind, retryable=not fatal, message=friendly_llm_error(exc))]}
+
+
+def _generate_safely(mode: Mode, variables: dict[str, str], state: ReportState, store: ObservationStore,
+                     deps: GraphDeps, config: RunnableConfig) -> DraftAttempt | Exception:
+    """`generate`, with a model/provider failure returned instead of raised (graph control flow passes)."""
+    try:
+        return generate(mode, variables, state, store, deps, config)
+    except GraphBubbleUp:
+        raise
+    except Exception as exc:  # noqa: BLE001 - mapped to a WorkflowError and a bounded retry
+        return exc
 
 
 def _report_data(state: ReportState, deps: GraphDeps) -> tuple[list[Observation], ObservationStore]:
@@ -171,13 +206,16 @@ def draft(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[s
     context = prompt_context(state, obs, deps)
     review, previous = state.get("review"), state.get("draft")
     if review is not None and review.action == "request_changes" and previous is not None:
-        attempt = generate("review_revise", review_revise_inputs(context, previous, review.comment or ""),
-                           state, store, deps, config)
-        out = _after_attempt(attempt, state, "draft")
-        if attempt.draft is not None:
-            out["review"] = None  # the comment has been applied
+        attempt = _generate_safely("review_revise", review_revise_inputs(context, previous, review.comment or ""),
+                                   state, store, deps, config)
     else:
-        out = _after_attempt(generate("draft", context, state, store, deps, config), state, "draft")
+        attempt = _generate_safely("draft", context, state, store, deps, config)
+    if isinstance(attempt, Exception):
+        out = _model_failure(attempt, state, "draft", deps.settings)
+    else:
+        out = _after_attempt(attempt, state, "draft")
+        if review is not None and review.action == "request_changes" and attempt.draft is not None:
+            out["review"] = None  # the comment has been applied
     out["revision_count"] = 0  # a new entry into drafting starts a fresh revision budget
     return out
 
@@ -187,7 +225,9 @@ def revise(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[
     emit_progress("revise", f"Revising the draft ({(state.get('revision_count') or 0) + 1})")
     obs, store = _report_data(state, deps)
     variables = revise_inputs(prompt_context(state, obs, deps), state["draft"], state["verification"].feedback)
-    attempt = generate("revise", variables, state, store, deps, config)
+    attempt = _generate_safely("revise", variables, state, store, deps, config)
+    if isinstance(attempt, Exception):
+        return _model_failure(attempt, state, "revise", deps.settings)
     out = _after_attempt(attempt, state, "revise")
     if attempt.draft is not None:
         out["revision_count"] = (state.get("revision_count") or 0) + 1
@@ -238,10 +278,13 @@ def verify_claims(state: ReportState, deps: GraphDeps, config: RunnableConfig) -
 
 
 def route_after_generation(state: ReportState, settings: Settings) -> Literal["verify", "retry", "fail_safe"]:
-    """Parsed -> verify; unparseable -> retry while MAX_PARSE_RETRIES allows, else the safe failure."""
-    history = state.get("draft_history") or []
-    if history and history[-1].draft is not None:
+    """Parsed -> verify; unparseable -> retry while MAX_PARSE_RETRIES allows; model/provider failure -> retry
+    while MAX_MODEL_RETRIES allows (never for the daily cap or a missing model); otherwise the safe failure."""
+    outcome = state.get("last_generation")
+    if outcome == "ok":
         return "verify"
+    if outcome == "model_error":
+        return "retry" if (state.get("model_retry_count") or 0) <= settings.max_model_retries else "fail_safe"
     return "retry" if (state.get("parse_retry_count") or 0) <= settings.max_parse_retries else "fail_safe"
 
 
@@ -256,8 +299,8 @@ def route_after_verify(state: ReportState, settings: Settings) -> Literal["revis
 def route_after_drafting(state: ReportState, settings: Settings) -> Literal["human_review", "fail_safe"]:
     """Parent edge after the drafting sub-graph: only a parsed, verified draft goes to the reviewer."""
     verification = state.get("verification")
-    parsed = (state.get("parse_retry_count") or 0) == 0
-    return "human_review" if parsed and verification is not None and verification.ok else "fail_safe"
+    generated = state.get("last_generation") == "ok"
+    return "human_review" if generated and verification is not None and verification.ok else "fail_safe"
 
 
 def build_drafting_graph(deps: GraphDeps) -> CompiledStateGraph:
