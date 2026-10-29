@@ -8,13 +8,13 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ```state
 milestone: M7a (M1–M6 merged)
 task: 1-6
-task_title: M7a — fixes done (affd814, 1124 tests), re-review running
-phase: reviewing
+task_title: M7a re-review 8.5/10 approved — fixing I2–I4, then M7b tasks 7–10 (same developer, same branch)
+phase: implementing
 branch: m7-graph
 base_commit: f81aa17
 last_verified_commit: f81aa17
 plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7a developer running in worktree D:/AI_Finance_summary-m7 (branch m7-graph). When it reports: single Opus review, fixes, then M7b (tasks 7–10) on the same branch, review, merge into main, full suite, push. M8 plan ready (2026-10-29-m8-web-ui.md); M9 plan ready, M9 tasks 1–4 running in parallel in D:/AI_Finance_summary-m9 (branch m9-finish).
+next_action: M7 developer fixing M7a re-review I2 (window base), I3 (AC 22 gap-fill consent), I4 (skips to prompt/review), then implementing M7b (checkpointer, runner+SSE, history/replay, error routes). Then single review of M7b, fixes, merge m7-graph into main. M9 early (m9-finish) fixing review I1–I4 in parallel; merge after M7. M8 plan ready (2026-10-29-m8-web-ui.md).
 updated: 2026-10-29
 ```
 
