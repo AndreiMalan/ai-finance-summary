@@ -135,3 +135,14 @@ def test_no_pairs_yields_empty_results(world):
     """Nothing selected: empty metrics, no error."""
     out = _run(world, ReportParams(mode="api", indicators=["GDP_VOL"], regions=["RO"]))
     assert out["metrics"] == [] and out["significant"] == []
+
+
+def test_one_period_report_uses_the_lookback_and_reports_only_its_window(world):
+    """D-035: a 2024-03-only report reads 2023-03 as the year-ago base, but reports only 2024-03 results."""
+    _seed(world)
+    out = _run(world, ReportParams(mode="api", indicators=["HICP_YOY"], regions=["RO"], period_from="2024-03",
+                                   period_to="2024-03"))
+    ids = {m.metric_id for m in out["metrics"]}
+    assert "pp_change:HICP_YOY:RO:2024-03:2023-03" in ids
+    assert {m.period for m in out["metrics"]} == {"2024-03"}
+    assert all(s.period in (None, "2024-03") for s in out["metric_skips"])

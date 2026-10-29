@@ -20,6 +20,7 @@ from langgraph.types import Send
 
 from statbrief.domain.dataset import DatasetRef, DetectedSchema
 from statbrief.graph.deps import GraphDeps, node
+from statbrief.graph.observations import lookback_start
 from statbrief.graph.state import (ApiRequest, FetchTask, IngestionInput, IngestionOutput, ParseTask, ReportState,
                                    SourceMeta, WorkflowError)
 from statbrief.ingest.detect import detect_schema
@@ -44,7 +45,9 @@ def select_sources(state: ReportState, deps: GraphDeps, config: RunnableConfig) 
     if params.mode != "upload":
         for code in params.indicators:
             if code in deps.catalog:
-                requests.append(ApiRequest(indicator=code, regions=params.regions, period_from=params.period_from,
+                # one year of look-back before the window, so year-ago bases exist (D-035)
+                requests.append(ApiRequest(indicator=code, regions=params.regions,
+                                           period_from=lookback_start(params.period_from),
                                            period_to=params.period_to))
             elif params.mode == "api":
                 errors.append(WorkflowError(node="select_sources", kind="unknown_indicator",
@@ -131,6 +134,10 @@ def fetch_api(task: FetchTask, deps: GraphDeps, config: RunnableConfig) -> dict[
         query_url=first.query_url if first is not None else None,  # type: ignore[union-attr]
         series_label=result.meta.label, unit_label=result.meta.unit_label,
         last_update=str(result.meta.last_update) if result.meta.last_update is not None else None)
+    if not result.observations:  # visible in the timeline: an indicator must never vanish silently (review M7)
+        return {"source_metadata": [meta], "errors": [WorkflowError(
+            node="fetch_api", kind="api_no_data", message=f"{label}: no observations for the requested regions "
+                                                          "and period")]}
     return {"source_metadata": [meta]}
 
 

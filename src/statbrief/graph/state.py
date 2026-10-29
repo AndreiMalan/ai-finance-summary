@@ -16,7 +16,8 @@ Reducers:
   `source_metadata`, `metrics`, `metric_skips`, `draft_history`, `errors`. Nodes that need to replace such a
   list return `langgraph.types.Overwrite(...)`.
 - `merge_dicts` for per-source dictionaries (`mappings`, `validation`): keys are merged and, for a key
-  written twice, the later write wins (parallel writers use distinct keys: one file id each).
+  written twice, the later write wins (parallel writers use distinct keys: one file id each); writing None
+  for a key deletes it.
 Every other key is last-value: exactly one node may write it in a super-step.
 """
 import operator
@@ -37,8 +38,10 @@ Status = Literal["collecting", "needs_input", "analyzing", "drafting", "awaiting
 
 
 def merge_dicts(left: dict | None, right: dict | None) -> dict:
-    """Reducer for per-source dicts: union of both; for a key in both, the later (right) value wins."""
-    return {**(left or {}), **(right or {})}
+    """Reducer for per-source dicts: union of both; for a key in both, the later (right) value wins; a right
+    value of None deletes the key (how a node drops a stale per-file entry)."""
+    merged = {**(left or {}), **(right or {})}
+    return {k: v for k, v in merged.items() if v is not None}
 
 
 class ApiRequest(BaseModel):
@@ -182,7 +185,8 @@ class ReportState(TypedDict, total=False):
     unit_mismatches: list[UnitMismatch]
     resolutions: dict[str, ConflictResolution]  # conflict_id -> the user's resolution
     dropped_sources: list[str]  # source ids the user chose to continue without
-    unit_mismatches_acknowledged: bool
+    acknowledged_mismatches: list[str]  # keys (validate.mismatch_key) of unit mismatches the user accepted
+    corroborations: dict[str, list[str]]  # kept obs_id -> agreeing obs ids collapsed into it (D-036)
     needs_input: ResolveRequest | None
     gate_rounds: int  # resolve rounds answered so far (bounded by MAX_REVISIONS)
     # analysis

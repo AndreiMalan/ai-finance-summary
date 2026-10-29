@@ -24,11 +24,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from statbrief.analytics.combine import detect_conflicts
 from statbrief.config import Settings
-from statbrief.domain.conflict import ConflictResolution
+from statbrief.domain.conflict import ConflictResolution, UnitMismatch
 from statbrief.domain.dataset import ColumnMapping, DatasetRef, Resolution, ValidationReport
 from statbrief.graph.deps import GraphDeps
-from statbrief.graph.observations import load_effective, view_from_state
-from statbrief.graph.state import BlockingIssues, FailedSource, PendingMapping, ReportState, ResolveRequest
+from statbrief.graph.observations import load_effective, load_effective_set, view_from_state
+from statbrief.graph.state import (BlockingIssues, FailedSource, PendingMapping, ReportState, ResolveRequest,
+                                   WorkflowError)
 from statbrief.ingest.normalize import UnresolvedIssues, to_observations
 from statbrief.ingest.readers import RawTable, read_grid, to_table
 from statbrief.ingest.sniff import UploadRejected
@@ -96,7 +97,12 @@ def _validate_file(ref: DatasetRef, mapping: ColumnMapping, state: ReportState,
     return report, []
 
 
-def validate_normalize(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
+def mismatch_key(m: UnitMismatch) -> str:
+    """Stable identity of one unit mismatch (what the user acknowledged)."""
+    return "|".join([m.indicator, m.region, m.period, *sorted(m.units)])
+
+
+def _validate_all(state: ReportState, deps: GraphDeps) -> dict[str, Any]:
     """Validate/normalize every file, detect conflicts, and say what (if anything) needs the user."""
     metas = {m.source_id: m for m in state.get("source_metadata") or []}
     dropped = set(state.get("dropped_sources") or [])
@@ -106,7 +112,8 @@ def validate_normalize(state: ReportState, deps: GraphDeps, config: RunnableConf
     blocking: list[BlockingIssues] = []
     failed = [FailedSource(source_id=m.source_id, label=m.label, message=m.message or "failed")
               for m in metas.values() if m.status == "failed" and m.source_id not in dropped]
-    reports: dict[str, ValidationReport] = {}
+    # Every file not validated this round loses its old report (merge_dicts deletes None values).
+    reports: dict[str, ValidationReport | None] = {fid: None for fid in state.get("validation") or {}}
     for ref in state.get("file_refs") or []:
         meta = metas.get(ref.file_id)
         if ref.file_id in dropped or meta is None or meta.status == "failed":
@@ -133,17 +140,38 @@ def validate_normalize(state: ReportState, deps: GraphDeps, config: RunnableConf
         if blocked:
             blocking.append(BlockingIssues(file_id=ref.file_id, filename=ref.filename,
                                            issues=[i for i in report.issues if i.issue_id in set(blocked)]))
-    observations = load_effective(deps, view_from_state(state), resolve=False)
+    view = view_from_state(state)
+    observations = load_effective(deps, view, resolve=False)
     scan = detect_conflicts(observations, rel_tol=deps.settings.conflict_rel_tol)
     resolutions = state.get("resolutions") or {}
+    acknowledged = set(state.get("acknowledged_mismatches") or [])
     request = ResolveRequest(
         mappings=pending, issues=blocking, conflicts=[c for c in scan.conflicts if c.conflict_id not in resolutions],
-        unit_mismatches=[] if state.get("unit_mismatches_acknowledged") else scan.unit_mismatches,
+        unit_mismatches=[m for m in scan.unit_mismatches if mismatch_key(m) not in acknowledged],
         failed_sources=failed, no_data=not observations)
     ready = request.empty and not request.no_data
-    return {"validation": reports, "conflicts": scan.conflicts, "unit_mismatches": scan.unit_mismatches,
-            "needs_input": request, "normalized_ref": state["report_id"] if ready else None,
-            "status": "analyzing" if ready else "needs_input"}
+    out: dict[str, Any] = {"validation": reports, "conflicts": scan.conflicts, "unit_mismatches": scan.unit_mismatches,
+                           "needs_input": request, "normalized_ref": state["report_id"] if ready else None,
+                           "status": "analyzing" if ready else "needs_input", "corroborations": {}}
+    if ready:  # provenance of the one-row-per-key collapse (D-036), for the export and the UI
+        effective = load_effective_set(deps, view.model_copy(update={"conflicts": scan.conflicts}))
+        out["corroborations"] = effective.corroborations
+    return out
+
+
+def validate_normalize(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
+    """Validate/normalize every file and detect conflicts; an unexpected failure ends in the safe failure.
+
+    Expected problems (mappings, blocking issues, unreadable files, failed sources) go to the resolve gate.
+    Anything else (a database outage, a bug) is recorded as a WorkflowError naming only the exception type,
+    and `needs_input=None` routes the run to `fail_safe` instead of crashing the graph.
+    """
+    try:
+        return _validate_all(state, deps)
+    except Exception as exc:  # the type only: messages may echo data or connection strings
+        return {"needs_input": None, "normalized_ref": None, "status": "failed",
+                "errors": [WorkflowError(node="validate_normalize", kind="internal_error", retryable=True,
+                                         message=f"validation stopped unexpectedly ({type(exc).__name__})")]}
 
 
 def route_after_validation(state: ReportState,
@@ -166,7 +194,7 @@ class ResolvePayload(BaseModel):
     issue_resolutions: dict[str, dict[str, Resolution]] = Field(default_factory=dict)  # file_id -> issue -> choice
     conflict_resolutions: list[ConflictResolution] = Field(default_factory=list)
     drop_sources: list[str] = Field(default_factory=list)  # continue without these sources
-    accept_unit_mismatches: bool = False
+    accept_unit_mismatches: bool = False  # acknowledges the mismatches shown now (later new ones are shown again)
     consent_gap_fill: bool | None = None  # None keeps the current choice
 
 
@@ -233,6 +261,10 @@ def resolve_gate(state: ReportState, deps: GraphDeps, config: RunnableConfig) ->
             continue
         break
     uid = state["user_id"]
+    remapped = {f"upload:{fid}" for fid in payload.mappings}
+    # A conflict id hashes candidate obs ids, which do not depend on the mapped value column: a choice made
+    # under a file's old mapping must not silently apply to its new values (review M6).
+    stale = {c.conflict_id for c in state.get("conflicts") or [] if remapped & set(c.sources)}
     for fid, mapping in payload.mappings.items():
         deps.mappings.save(uid, fid, mapping)  # also drops the file's old validation report and observations
     for report in reports.values():
@@ -245,10 +277,12 @@ def resolve_gate(state: ReportState, deps: GraphDeps, config: RunnableConfig) ->
         "confirmed_mappings": sorted(set(state.get("confirmed_mappings") or []) | set(payload.confirm_mappings)
                                      | set(payload.mappings)),
         "validation": reports,
-        "resolutions": {**(state.get("resolutions") or {}),
-                        **{r.conflict_id: r for r in payload.conflict_resolutions}},
+        "resolutions": {**{k: v for k, v in (state.get("resolutions") or {}).items() if k not in stale},
+                        **{r.conflict_id: r for r in payload.conflict_resolutions
+                           if r.conflict_id not in stale}},
         "dropped_sources": sorted(set(state.get("dropped_sources") or []) | set(payload.drop_sources)),
-        "unit_mismatches_acknowledged": bool(state.get("unit_mismatches_acknowledged"))
-        or payload.accept_unit_mismatches,
+        "acknowledged_mismatches": sorted(set(state.get("acknowledged_mismatches") or []) | (
+            {mismatch_key(m) for m in (state.get("needs_input") or ResolveRequest()).unit_mismatches}
+            if payload.accept_unit_mismatches else set())),
         "params": params, "gate_rounds": (state.get("gate_rounds") or 0) + 1, "status": "collecting",
     }

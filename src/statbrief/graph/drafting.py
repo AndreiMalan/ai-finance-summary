@@ -13,7 +13,9 @@ calling (ENABLE_DRAFT_TOOLS; the draft is submitted as a `ReportDraft` tool call
 through the M6 structured-output chains. A new tool list (one shared row budget) is built per call.
 
 `verify_claims` recomputes every claim (M4 `verify_draft`) and applies the unknown-column guard (M6
-`check_unknown_columns`); guard violations fail verification and are appended to the feedback.
+`check_unknown_columns`) and checks citations (every `Citation.ref_id` must be a retrieved passage or a
+source of this report, and every section citation id must be among the draft's citations); violations fail
+verification and are appended to the feedback.
 
 Bounds: an unparseable reply is retried while `parse_retry_count <= MAX_PARSE_RETRIES` (consecutive
 failures); a failed verification is revised while `revision_count < MAX_REVISIONS`. The sub-graph then ends;
@@ -112,8 +114,10 @@ def supports_tools(model: BaseChatModel) -> bool:
 
 def _series_meta(state: ReportState) -> dict[str, SeriesMeta]:
     """Source metadata of the fetched API series by indicator code (for get_indicator_metadata)."""
+    dropped = set(state.get("dropped_sources") or [])
     return {m.indicator: SeriesMeta(m.series_label, m.unit_label, m.last_update)
-            for m in state.get("source_metadata") or [] if m.kind == "api" and m.status == "ok" and m.indicator}
+            for m in state.get("source_metadata") or []
+            if m.kind == "api" and m.status == "ok" and m.indicator and m.source_id not in dropped}
 
 
 def generate(mode: Mode, variables: dict[str, str], state: ReportState, store: ObservationStore, deps: GraphDeps,
@@ -187,20 +191,46 @@ def revise(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[
     return out
 
 
-def verify(draft_: ReportDraft, store: ObservationStore, undocumented: set[str]) -> VerificationResult:
-    """Deterministic verification plus the unknown-column guard (violations fail it and join the feedback)."""
+CITATION_HEADER = "Citation rules (fix every item):"
+
+
+def citable_ids(state: ReportState, observations: Sequence[Observation]) -> set[str]:
+    """Ref ids a draft may cite: retrieved passages (doc_id) and the report's data sources (file / series id)."""
+    return {p.doc_id for p in state.get("retrieved") or []} | {s.ref_id for s in source_infos(observations)}
+
+
+def citation_problems(draft_: ReportDraft, allowed: set[str]) -> list[str]:
+    """Citations naming no retrieved passage or report source, and section citation ids that cite nothing."""
+    problems = [f"citation '{c.ref_id}' is not a retrieved passage or a source of this report: use a listed "
+                "ref_id" for c in draft_.citations if c.ref_id not in allowed]
+    cited = {c.ref_id for c in draft_.citations}
+    problems += [f"section {i} lists citation id '{ref}' that is not in citations"
+                 for i, sec in enumerate(draft_.sections, 1) for ref in sec.citation_ids if ref not in cited]
+    return problems
+
+
+def verify(draft_: ReportDraft, store: ObservationStore, undocumented: set[str],
+           allowed_citations: set[str]) -> VerificationResult:
+    """Deterministic verification plus the unknown-column guard and the citation check (violations fail it
+    and join the feedback)."""
     result = verify_draft(draft_, store)
     violations = check_unknown_columns(draft_, undocumented, store)
-    if not violations:
+    bad_citations = citation_problems(draft_, allowed_citations)
+    if not violations and not bad_citations:
         return result
-    feedback = "\n".join(part for part in (result.feedback, GUARD_HEADER, *(f"- {v}" for v in violations)) if part)
-    return VerificationResult(ok=False, checks=result.checks, orphan_numbers=result.orphan_numbers, feedback=feedback)
+    parts = [result.feedback]
+    if violations:
+        parts += [GUARD_HEADER, *(f"- {v}" for v in violations)]
+    if bad_citations:
+        parts += [CITATION_HEADER, *(f"- {v}" for v in bad_citations)]
+    return VerificationResult(ok=False, checks=result.checks, orphan_numbers=result.orphan_numbers,
+                              feedback="\n".join(p for p in parts if p))
 
 
 def verify_claims(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
-    """Verify the current draft against the report's observations."""
-    _, store = _report_data(state, deps)
-    return {"verification": verify(state["draft"], store, undocumented_columns(state))}
+    """Verify the current draft against the report's observations and sources."""
+    obs, store = _report_data(state, deps)
+    return {"verification": verify(state["draft"], store, undocumented_columns(state), citable_ids(state, obs))}
 
 
 def route_after_generation(state: ReportState, settings: Settings) -> Literal["verify", "retry", "fail_safe"]:

@@ -159,7 +159,10 @@ class ReportState(TypedDict, total=False):
     file_refs: list[DatasetRef]                        # blob keys, never bytes
     api_requests: list[ApiRequest]
     source_metadata: Annotated[list[SourceMeta], operator.add]       # fan-in from Send
-    mappings: dict[str, ColumnMapping]                 # file_id -> mapping (survives resume)
+    mappings: Annotated[dict[str, ColumnMapping], merge_dicts]  # file_id -> mapping (survives resume; parallel writers)
+    confirmed_mappings: list[str]; dropped_sources: list[str]; acknowledged_mismatches: list[str]
+    unit_mismatches: list[UnitMismatch]; needs_input: ResolveRequest | None; gate_rounds: int
+    corroborations: dict[str, list[str]]               # kept obs_id -> agreeing rows collapsed into it (D-036)
     validation: Annotated[dict[str, ValidationReport], merge_dicts]  # per source
     normalized_ref: str | None                         # observations persisted in DB, state holds the ref
     conflicts: list[Conflict]; resolutions: dict[str, ConflictResolution]
@@ -176,10 +179,10 @@ class ReportState(TypedDict, total=False):
     review: ReviewDecision | None; review_round: int
     export: ExportStatus | None
     errors: Annotated[list[WorkflowError], operator.add]
-    status: Literal["collecting","needs_input","analyzing","drafting","awaiting_review","approved","exported","failed"]
+    status: Literal["collecting","needs_input","analyzing","drafting","awaiting_review","approved","exported","rejected","failed"]
 ```
 
-Large data (observations, raw files) is stored in Postgres/Blob; state carries references so checkpoints stay small (Vercel time + Neon size).
+Large data (observations, raw files) is stored in Postgres/Blob; state carries references so checkpoints stay small (Vercel time + Neon size). As implemented in M7a: `merge_dicts` deletes a key written as None; the state holds typed objects restored through the allow-listed serializer `graph.serde.make_serializer()` (D-037); data-flow choices in D-035, D-036 and D-038.
 
 ## 4. Data flow
 
@@ -252,6 +255,8 @@ async def run_segment(report_id: str, user: User, command: Command | None, budge
 def build_pdf(bundle: ReportBundle) -> bytes
 def build_xlsx(bundle: ReportBundle) -> bytes
 ```
+
+Resume values: LangGraph reads `Command(resume={})` as an empty interrupt-id map, so an empty dict never reaches the interrupted node (the interrupt is simply shown again). The runner must never send a bare `{}`: a "nothing to change" answer carries at least one key (e.g. `{"drop_sources": []}`), and the route rejects empty forms.
 
 `GraphDeps` (dataclass) injects model, embeddings/retriever, repos, blob store, API clients, clock — so tests swap in `GenericFakeChatModel`, fake embeddings, `MemorySaver`/`InMemoryStore`, and stub API clients.
 

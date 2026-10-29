@@ -140,3 +140,16 @@ def test_without_tools_the_structured_chain_is_used(world):
     model = fake_model(report_call(draft_for(m, "0.6")))
     out = _run(world, model, enable_draft_tools=False)
     assert out["status"] == "awaiting_review" and model.structured_method == "function_calling"
+
+
+def test_unknown_citation_is_revised(world):
+    """Review M3: a citation that is neither a retrieved passage nor a report source fails verification."""
+    m = _metric(world)
+    bad = draft_for(m, "0.6")
+    bad["citations"] = [{"kind": "reference", "ref_id": "made-up-doc", "label": "Invented"}]
+    bad["sections"][0]["citation_ids"] = ["made-up-doc"]
+    good = draft_for(m, "0.6")
+    good["citations"] = [{"kind": "api", "ref_id": "UNEMP_RATE?test", "label": "Eurostat series"}]
+    good["sections"][0]["citation_ids"] = ["UNEMP_RATE?test"]
+    out = _run(world, fake_model(report_call(bad), report_call(good)))
+    assert out["status"] == "awaiting_review" and out["revision_count"] == 1

@@ -7,7 +7,7 @@
 `human_review` pauses with the verified draft, its verification and its citations. The resume value is
 validated with `ReviewPayload` (approve / reject / request_changes with a comment, optionally an edited draft
 from the UI); an invalid value interrupts again with the error and never raises. An edited draft is verified
-again (numbers and the unknown-column guard) before it is accepted: if it fails, the reviewer sees the
+again (numbers, the unknown-column guard and citations) before it is accepted: if it fails, the reviewer sees the
 feedback and decides again, so nothing unverified is ever exported. Change requests are bounded by
 MAX_REVISIONS rounds; at the limit the reviewer must approve or reject.
 
@@ -21,11 +21,12 @@ from langgraph.graph import END
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from statbrief.analytics.store import ObservationStore
 from statbrief.domain.report import ExportStatus, ReportDraft
 from statbrief.domain.review import ReviewDecision, VerificationResult
 from statbrief.graph.deps import GraphDeps
-from statbrief.graph.drafting import undocumented_columns, verify
-from statbrief.graph.observations import load_store, view_from_state
+from statbrief.graph.drafting import citable_ids, undocumented_columns, verify
+from statbrief.graph.observations import load_effective, view_from_state
 from statbrief.graph.state import ReportState
 
 
@@ -83,8 +84,9 @@ def human_review(state: ReportState, deps: GraphDeps, config: RunnableConfig) ->
                      "approve or reject the draft.")
             continue
         if payload.edited_draft is not None:
-            result = verify(payload.edited_draft, load_store(deps, view_from_state(state)),
-                            undocumented_columns(state))
+            obs = load_effective(deps, view_from_state(state))
+            result = verify(payload.edited_draft, ObservationStore(obs), undocumented_columns(state),
+                            citable_ids(state, obs))
             draft, verification = payload.edited_draft, result
             if not result.ok:
                 error = "The edited draft failed verification; correct it and decide again."

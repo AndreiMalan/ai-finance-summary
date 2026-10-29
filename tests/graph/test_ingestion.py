@@ -131,3 +131,11 @@ def test_no_sources_ends_cleanly(world):
     """Upload mode without files: no tasks, no error, empty metadata."""
     out = _run(world, params=ReportParams(mode="upload"))
     assert out.get("source_metadata", []) == [] and out["file_refs"] == []
+
+
+def test_api_source_without_data_is_a_visible_warning(world):
+    """Review M7: a fetched series with no observations for the request is not silently 'ok'."""
+    world.api.serve("HICP_YOY", {"RO": {}})  # Eurostat: an empty time dimension is a valid, empty selection
+    out = _run(world, params=ReportParams(mode="api", indicators=["HICP_YOY"], regions=["RO"]))
+    assert out["source_metadata"][0].observation_count == 0
+    assert [e.kind for e in out["errors"]] == ["api_no_data"]

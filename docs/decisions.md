@@ -139,3 +139,31 @@ Rationale: M6 review I1. Common-word headers made ordinary prose ("Total employm
 
 `DailyLLMCap` de-duplicates by `run_id`. A run-events handler that shares the same cap (so it can log a blocked call as `llm_error`) therefore never counts a call twice, and a blocked run stays blocked. Provider-internal retries (`LLM_MAX_RETRIES`) are part of one counted call. A failing cap check (database down) fails closed and is logged as `llm_error` with the exception type.
 Rationale: M6 review I2. An opt-in cap on each call site could be forgotten (uncapped spend) or attached twice (double counting).
+
+## D-035 — One year of look-back before the report window
+2026-10-29 · The analysis reads one year before `period_from`, frequency-aware: the same period one year earlier, which means 12 months, 4 quarters or 1 year (`graph.observations.lookback_start`). This holds for uploads and for API requests alike: `ApiRequest.period_from` is the look-back start. Change metrics therefore have their year-ago base. Metrics and skips are *reported* only when their period lies inside [`period_from`, `period_to`] (`nodes_analyze.report_window_only`), so look-back periods never appear as results. Conflicts in the look-back year are still shown to the user, because they feed the year-ago bases.
+Rationale: M7a review M2. Filtering uploads to the window meant a one-year report had no YoY at all.
+
+## D-036 — One effective row per data point; uploads take precedence over agreeing API values
+2026-10-29 · After conflict resolution, the effective observation set has exactly one row per (indicator, region, period, unit, unit_multiplier) (`graph.observations.collapse_duplicates`). Where values from different sources agree, or differ only within the conflict tolerance, the **upload** row is kept, because the user's data is primary. Otherwise the row with the lowest source key, then the lowest obs id, is kept. The ids of the collapsed rows are recorded as corroborations of the kept row (`ReportState.corroborations`, for export and provenance), so nothing is silently lost.
+
+Consented gap filling adds one row only for a key whose uploaded value is missing or absent. The filled copy (its own `gapfill` id, API provenance) replaces both the missing upload point and the API point it copies. Without consent, an uploaded missing value stays primary.
+
+A "prefer" or "exclude" resolution leaves one row or none. "Keep both" keeps both labelled rows, and metrics touching that period are recorded as skipped ("ambiguous"): they are never averaged or picked.
+Rationale: M7a review C1. Duplicate agreeing rows made M4 skip every metric as ambiguous, with no gate.
+
+## D-037 — Typed graph state with an allow-listed checkpoint serializer
+2026-10-29 · `ReportState` holds Pydantic models and the frozen dataclasses `DraftAttempt` and `RetrievedPassage`. Every checkpointer is created with `serde=graph.serde.make_serializer()`, a `JsonPlusSerializer` whose `allowed_msgpack_modules` lists exactly the state classes. A test walks every annotation reachable from the state, the sub-graph schemas and the Send payloads, and fails when a class is missing. Without the list, an unlisted class would come back as a plain dict. Interrupt values are plain JSON dicts.
+Rationale: a checkpoint must not instantiate arbitrary classes, and LangGraph 4.3 deprecates unregistered types.
+
+## D-038 — Graph data-flow choices (M7a)
+2026-10-29 ·
+- API observations are stored by `fetch_api` as file-less rows (`ObservationRepo.upsert_api_observations`), which never overwrite upload rows.
+- `mappings` uses the `merge_dicts` reducer, because parallel `parse_file` tasks write it. In `merge_dicts`, a None value deletes a key, which is how stale per-file validation reports are dropped.
+- A resume that changes a file's mapping cannot also resolve that file's issues (D-027: the new mapping deletes the old report). Conflict resolutions that involve the remapped file are cleared.
+- Unit mismatches are acknowledged per mismatch. One that appears later is shown again.
+- An unexpected exception in `validate_normalize` ends in `fail_safe` with a `WorkflowError` that names only the exception type.
+- Draft citations must name a retrieved passage or a source of this report, or verification fails.
+- New state keys (architecture §3): `confirmed_mappings`, `unit_mismatches`, `dropped_sources`, `acknowledged_mismatches`, `corroborations`, `needs_input`, `gate_rounds`, and status `rejected`.
+
+Rationale: M7a implementation and review (M1, M3, M5, M6, M9).

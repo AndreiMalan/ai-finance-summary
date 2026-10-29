@@ -23,7 +23,7 @@ from statbrief.domain.metrics import MetricResult, MetricSkip
 from statbrief.domain.observation import Observation
 from statbrief.domain.report import ReportParams
 from statbrief.graph.deps import GraphDeps
-from statbrief.graph.observations import load_effective, view_from_state
+from statbrief.graph.observations import in_window, load_effective, view_from_state
 from statbrief.graph.state import AnalyzeTask, ObservationView, ReportState
 
 
@@ -92,9 +92,25 @@ def sort_results(metrics: Sequence[MetricResult],
     return [by_id[k] for k in sorted(by_id)], [unique_skips[k] for k in sorted(unique_skips)]
 
 
+def report_window_only(metrics: Sequence[MetricResult], skips: Sequence[MetricSkip],
+                       params: ReportParams) -> tuple[list[MetricResult], list[MetricSkip]]:
+    """Metrics and skips whose (reporting) period lies inside the report's window (D-035).
+
+    The analysis reads one extra year before `period_from` so year-ago bases exist; results for those
+    look-back periods are not reported (their base periods may lie in the look-back year).
+    """
+    def inside(period: str | None) -> bool:
+        """Whether a reporting period belongs to the report (a skip without a period always does)."""
+        return period is None or in_window(period, params.period_from, params.period_to)
+
+    return [m for m in metrics if inside(m.period)], [s for s in skips if inside(s.period)]
+
+
 def aggregate_metrics(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
-    """Replace the fanned-in lists by their deterministic, de-duplicated order."""
-    metrics, skips = sort_results(state.get("metrics") or [], state.get("metric_skips") or [])
+    """Keep the report window's results, in a deterministic, de-duplicated order (replaces the fan-in)."""
+    metrics, skips = report_window_only(state.get("metrics") or [], state.get("metric_skips") or [],
+                                        state["params"])
+    metrics, skips = sort_results(metrics, skips)
     return {"metrics": Overwrite(metrics), "metric_skips": Overwrite(skips)}
 
 

@@ -137,6 +137,17 @@ class ReportParams(BaseModel):
             raise ValueError("period_from must not be after period_to")
         if self.mode != "upload" and not self.regions:
             raise ValueError("API data needs at least one region")
+        forward: dict[str, str] = {}
+        backward: dict[str, str] = {}
+        for link in self.links:  # links must be one-to-one (same rule as analytics.combine), each stated once
+            if forward.get(link.upload_code) == link.catalog_code:
+                raise ValueError(f"the link {link.upload_code!r} -> {link.catalog_code!r} is given twice")
+            if forward.setdefault(link.upload_code, link.catalog_code) != link.catalog_code:
+                raise ValueError(f"uploaded indicator {link.upload_code!r} is linked to more than one catalog "
+                                 "indicator")
+            if backward.setdefault(link.catalog_code, link.upload_code) != link.upload_code:
+                raise ValueError(f"catalog indicator {link.catalog_code!r} is linked to more than one uploaded "
+                                 "indicator")
         return self
 
 

@@ -164,3 +164,58 @@ def test_mermaid_diagram_renders_and_matches_docs(world):
                  "verify_claims", "revise"):
         assert name in text
     assert DIAGRAM.read_text(encoding="utf-8") == text, "regenerate docs/graph.mmd with mermaid_diagram()"
+
+
+# --- review C1 / D-035 / D-036 at graph level: metrics, not only the run status --------------------------------
+
+def _combined_run(world, rows, consent=False):
+    """Upload IRS_UNEMP (linked to UNEMP_RATE) + Eurostat UNEMP_RATE with the same values; run until drafting
+    fails on purpose (unparseable replies) and return the final state values."""
+    from statbrief.domain.conflict import IndicatorLink
+    from tests.graph.helpers import fake_model, monthly
+    from tests.unit.llm.fakes import invalid_tool_call_message
+    world.add_file("irs.csv", long_csv(rows))
+    world.api.serve("UNEMP_RATE", {"RO": dict(zip(monthly(2023, [0.0] * 13), [r[3] for r in unemp_rows()]))})
+    params = ReportParams(mode="combined", indicators=["UNEMP_RATE"], regions=["RO"], period_from="2023-01",
+                          period_to="2024-01", consent_gap_fill=consent,
+                          links=[IndicatorLink(upload_code="IRS_UNEMP", catalog_code="UNEMP_RATE")])
+    model = fake_model(*[invalid_tool_call_message("ReportDraft", "{") for _ in range(3)])
+    deps = world.deps(chat_model=model)
+    graph = build_graph(InMemorySaver(serde=make_serializer()), None, deps)
+    cfg = graph_config(world.report_id, deps.settings)
+    out = graph.invoke(world.base_state(params), cfg)
+    assert "__interrupt__" not in out  # agreeing data: nothing to resolve
+    return graph.get_state(cfg).values
+
+
+def _upload_ids(world) -> set[str]:
+    """Ids of the uploaded (file) observations of the report."""
+    from statbrief.domain.observation import UploadProvenance
+    return {o.obs_id for o in ObservationRepo(world.pool).list_for_report(world.user_id, world.report_id)
+            if isinstance(o.provenance, UploadProvenance)}
+
+
+def test_combined_agreeing_sources_give_the_upload_only_metrics(world):
+    """C1: upload + agreeing linked API series -> metrics exist, equal the upload-only ones, no ambiguity."""
+    from statbrief.graph.nodes_analyze import report_window_only, sort_results
+    state = _combined_run(world, unemp_rows())
+    uploads = [o.model_copy(update={"indicator_code": "UNEMP_RATE"})
+               for o in ObservationRepo(world.pool).list_for_report(world.user_id, world.report_id)
+               if o.obs_id in _upload_ids(world)]
+    expected, skips = sort_results(*report_window_only(*compute_metrics(uploads, indicator="UNEMP_RATE",
+                                                                          region="RO"), state["params"]))
+    assert state["metrics"] and state["metrics"] == expected
+    assert not any("ambiguous" in s.reason for s in state["metric_skips"])
+    assert len(state["corroborations"]) == 13 and set(state["corroborations"]) <= _upload_ids(world)
+    pp = next(m for m in state["metrics"] if m.metric_id == "pp_change:UNEMP_RATE:RO:2024-01:2023-01")
+    assert pp.value == pytest.approx(5.6 - 5.01)
+
+
+def test_consented_gap_fill_makes_the_filled_month_usable(world):
+    """C1: 2023-12 is missing from the upload; with consent it is filled once and the MoM change is computed."""
+    rows = [r for r in unemp_rows() if r[0] != "2023-12"]
+    state = _combined_run(world, rows, consent=True)
+    step = next(m for m in state["metrics"] if m.metric_id == "pp_change:UNEMP_RATE:RO:2024-01:2023-12")
+    assert step.value == pytest.approx(5.6 - 5.12)
+    assert any(i not in _upload_ids(world) for i in step.observation_ids)  # the filled point (API provenance)
+    assert not any("ambiguous" in s.reason for s in state["metric_skips"])

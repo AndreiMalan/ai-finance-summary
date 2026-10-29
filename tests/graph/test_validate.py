@@ -1,4 +1,5 @@
 """Validation, conflicts and interrupt #1 (M7 Task 3): skip when clean, resume with fixes, invalid resumes."""
+import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
@@ -158,3 +159,72 @@ def test_no_data_fails_safely(world):
     """Upload mode without files: nothing to analyse, safe failure with a reason."""
     out = _graph(world.deps()).invoke(world.base_state(UPLOAD), CFG)
     assert out["status"] == "failed" and "No usable observations" in out["errors"][-1].message
+
+
+# --- review fixes ------------------------------------------------------------------------------------------------
+
+def test_unexpected_failure_in_validation_fails_safe(world):
+    """Review I1: any unexpected exception in validate_normalize ends in fail_safe with a WorkflowError."""
+    import dataclasses
+
+    class BrokenObservations(ObservationRepo):
+        """Reads fail like a database outage."""
+
+        def list_for_report(self, user_id, report_id):
+            """Simulate an outage (the message must not reach the user)."""
+            raise RuntimeError("connection to secret-host failed")
+
+    world.add_file("irs.csv", long_csv(unemp_rows()))
+    deps = dataclasses.replace(world.deps(), observations=BrokenObservations(world.pool))
+    out = _graph(deps).invoke(world.base_state(UPLOAD), CFG)
+    assert out["status"] == "failed" and "__interrupt__" not in out
+    internal = [e for e in out["errors"] if e.kind == "internal_error"]
+    assert internal and "RuntimeError" in internal[0].message and "secret" not in internal[0].message
+
+
+@pytest.mark.parametrize("payload_key", ["confirm_mappings", "mappings", "conflict_resolutions", "drop_sources",
+                                         "issue_resolutions"])
+def test_resume_naming_another_reports_ids_is_rejected(world, payload_key):
+    """Review M10: ids from another user's or report's data are 'unknown' and re-interrupt; nothing is written."""
+    ref = world.add_file("cryptic.csv", long_csv(unemp_rows(), header=CRYPTIC))
+    foreign = "00000000-0000-0000-0000-00000000beef"
+    graph = _graph(world.deps())
+    graph.invoke(world.base_state(UPLOAD), CFG)
+    payload = {"confirm_mappings": {"confirm_mappings": [foreign]},
+               "mappings": {"mappings": {foreign: _mapping().model_dump(mode="json")}},
+               "conflict_resolutions": {"conflict_resolutions": [{"conflict_id": "cf_foreign", "choice": "exclude"}]},
+               "drop_sources": {"drop_sources": [foreign]},
+               "issue_resolutions": {"issue_resolutions": {foreign: {"x": "excluded"}}}}[payload_key]
+    value = _interrupt(graph.invoke(Command(resume=payload), CFG))
+    assert value["error"] and value["round"] == 1
+    assert MappingRepo(world.pool).get(world.user_id, ref.file_id) is None
+
+
+def test_unit_mismatch_acknowledgement_is_per_mismatch(world):
+    """Review M1: accepting records the keys of the mismatches shown, not a global flag."""
+    world.api.serve("UNEMP_RATE", {"RO": monthly(2023, [5.8] * 13)})
+    world.add_file("irs.csv", long_csv([(p, r, "UNEMP_RATE", v, "PERS") for p, r, _, v, _ in unemp_rows()]))
+    params = ReportParams(mode="combined", indicators=["UNEMP_RATE"], regions=["RO"], period_from="2023-01",
+                          period_to="2024-01")
+    graph = _graph(world.deps())
+    value = _interrupt(graph.invoke(world.base_state(params), CFG))
+    assert len(value["unit_mismatches"]) == 13
+    out = graph.invoke(Command(resume={"accept_unit_mismatches": True}), CFG)
+    assert out["status"] == "analyzing" and len(out["acknowledged_mismatches"]) == 13
+    assert all(k.startswith("UNEMP_RATE|RO|") for k in out["acknowledged_mismatches"])
+
+
+def test_remapping_a_file_clears_its_conflict_resolutions(world):
+    """Review M6: choices made under a file's old mapping do not carry over to its new values."""
+    world.api.serve("UNEMP_RATE", {"RO": monthly(2023, [5.8] * 13)})
+    ref = world.add_file("irs.csv", long_csv(unemp_rows(indicator="UNEMP_RATE")))
+    params = ReportParams(mode="combined", indicators=["UNEMP_RATE"], regions=["RO"], period_from="2023-01",
+                          period_to="2024-01")
+    graph = _graph(world.deps())
+    conflicts = _interrupt(graph.invoke(world.base_state(params), CFG))["conflicts"]
+    mapping = ColumnMapping(date_col="date", region_col="region", indicator_col="indicator", value_col="value",
+                            unit_col="unit")
+    value = _interrupt(graph.invoke(Command(resume={
+        "mappings": {ref.file_id: mapping.model_dump(mode="json")},
+        "conflict_resolutions": [{"conflict_id": c["conflict_id"], "choice": "exclude"} for c in conflicts]}), CFG))
+    assert len(value["conflicts"]) == 13 and graph.get_state(CFG).values["resolutions"] == {}

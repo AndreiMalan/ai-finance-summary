@@ -33,6 +33,7 @@ def test_merge_dicts_later_key_wins():
     assert merge_dicts({"a": 1, "b": 2}, {"b": 3, "c": 4}) == {"a": 1, "b": 3, "c": 4}
     assert merge_dicts(None, {"a": 1}) == {"a": 1}
     assert merge_dicts({"a": 1}, None) == {"a": 1}
+    assert merge_dicts({"a": 1, "b": 2}, {"a": None}) == {"b": 2}
 
 
 def test_report_params_validation():
@@ -179,7 +180,7 @@ def full_state() -> ReportState:
         "validation": {"f1": ValidationReport(file_id="f1", row_count=3, issues=[issue])},
         "normalized_ref": "r1", "conflicts": [conflict], "unit_mismatches": [mismatch],
         "resolutions": {"cf_1": ConflictResolution(conflict_id="cf_1", choice="keep_both")},
-        "dropped_sources": ["api:WB_CPI"], "unit_mismatches_acknowledged": True, "needs_input": resolve,
+        "dropped_sources": ["api:WB_CPI"], "acknowledged_mismatches": ["X|RO|2024|%|EUR"], "corroborations": {"a": ["b"]}, "needs_input": resolve,
         "gate_rounds": 1, "metrics": [metric],
         "metric_skips": [MetricSkip(kind="mom", indicator="HICP_YOY", region="RO", reason="no base")],
         "significant": [SignificantChange(metric_id=metric.metric_id, magnitude=2.5, rule="top_mover")],
@@ -222,3 +223,18 @@ def test_state_round_trips_through_the_checkpointer(caplog):
     assert isinstance(restored["needs_input"].issues[0].issues[0], ValidationIssue)
     noisy = [r.getMessage() for r in caplog.records if "unregistered" in r.getMessage() or "Blocked" in r.getMessage()]
     assert noisy == []
+
+
+def test_report_params_reject_duplicate_or_contradictory_links():
+    """Review I1: links must be one-to-one and stated once; the request fails at the boundary."""
+    def params(*pairs):
+        """Combined-mode params with the given (upload, catalog) links."""
+        return ReportParams(mode="combined", regions=["RO"],
+                            links=[IndicatorLink(upload_code=u, catalog_code=c) for u, c in pairs])
+
+    assert len(params(("U1", "GDP_VOL"), ("U2", "UNEMP_RATE")).links) == 2
+    for pairs, message in (((("U1", "GDP_VOL"), ("U1", "UNEMP_RATE")), "more than one catalog"),
+                           ((("U1", "GDP_VOL"), ("U2", "GDP_VOL")), "more than one uploaded"),
+                           ((("U1", "GDP_VOL"), ("U1", "GDP_VOL")), "given twice")):
+        with pytest.raises(ValidationError, match=message):
+            params(*pairs)
