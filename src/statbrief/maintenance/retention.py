@@ -11,6 +11,11 @@ Rules (periods from Settings, all env-configurable):
   and at once for threads whose report no longer exists.
 - Logs: run_events, login_attempts and usage_events older than LOG_RETENTION_DAYS.
 - Abandoned chunked uploads (staged in Postgres, never completed) older than UPLOAD_ABANDON_HOURS.
+- Orphaned blobs: stored objects under "users/" that no unpurged `files` row and no `report_versions` row
+  references, older than BLOB_ORPHAN_GRACE_HOURS (the grace covers the window between a blob upload and
+  the insert of its row). They come from best-effort cleanups that failed (file deletion, a failed export
+  or upload completion). Staged uploads live in Postgres, so the `uploads` table references no blob.
+The cheap SQL rules run first, so a large Blob backlog cannot starve them within one request.
 Each rule handles at most RETENTION_BATCH_SIZE rows per run (bounded work per request). A rule that fails
 is logged (exception class only) and reported; the other rules still run.
 """
@@ -23,7 +28,7 @@ from psycopg_pool import ConnectionPool
 
 from statbrief.config import Settings
 from statbrief.maintenance.langgraph_data import delete_threads, stale_thread_ids
-from statbrief.storage.blobs import BlobStore
+from statbrief.storage.blobs import USERS_PREFIX, BlobStore
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,8 @@ class CleanupResult:
     login_attempts_deleted: int = 0
     usage_events_deleted: int = 0
     uploads_deleted: int = 0
+    orphan_blobs_deleted: int = 0
+    orphan_blobs_failed: int = 0
     failed_rules: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -61,10 +68,12 @@ def purge_raw_files(pool: ConnectionPool, blobs: BlobStore, settings: Settings, 
     with pool.connection() as c:
         rows = c.execute(
             "SELECT f.id, f.blob_key FROM files f JOIN reports r ON r.id = f.report_id "
-            "WHERE f.purged_at IS NULL AND ((r.approved_at IS NULL AND r.last_activity_at < %s) "
-            "OR (r.approved_at IS NOT NULL AND r.approved_at < %s)) ORDER BY f.created_at, f.id LIMIT %s",
-            (now - timedelta(days=settings.retention_unfinished_days),
-             now - timedelta(days=settings.retention_approved_days), settings.retention_batch_size)).fetchall()
+            "WHERE f.purged_at IS NULL AND ((r.approved_at IS NULL AND r.last_activity_at < %(unfinished)s) "
+            "OR (r.approved_at IS NOT NULL AND r.approved_at < %(approved)s AND f.created_at < %(approved)s)) "
+            "ORDER BY f.created_at, f.id LIMIT %(n)s",
+            {"unfinished": now - timedelta(days=settings.retention_unfinished_days),
+             "approved": now - timedelta(days=settings.retention_approved_days),
+             "n": settings.retention_batch_size}).fetchall()
     purged = failed = 0
     for row in rows:
         try:
@@ -109,6 +118,50 @@ def purge_abandoned_uploads(pool: ConnectionPool, settings: Settings, now: datet
                           settings.retention_batch_size)).rowcount
 
 
+def _referenced(pool: ConnectionPool, keys: list[str]) -> set[str]:
+    """The keys an unpurged file row or an export row still references."""
+    with pool.connection() as c:
+        rows = c.execute("SELECT blob_key FROM files WHERE purged_at IS NULL AND blob_key = ANY(%(k)s) "
+                         "UNION SELECT blob_key FROM report_versions WHERE blob_key = ANY(%(k)s)",
+                         {"k": keys}).fetchall()
+    return {r["blob_key"] for r in rows}
+
+
+def sweep_orphan_blobs(pool: ConnectionPool, blobs: BlobStore, settings: Settings, now: datetime) -> tuple[int, int]:
+    """Delete unreferenced blobs older than BLOB_ORPHAN_GRACE_HOURS (at most a batch); returns (deleted, failed)."""
+    cutoff = now - timedelta(hours=settings.blob_orphan_grace_hours)
+    batch_size = settings.retention_batch_size
+    deleted = failed = 0
+    pending: list[str] = []
+
+    def flush() -> None:
+        """Delete the unreferenced keys among `pending`."""
+        nonlocal deleted, failed
+        referenced = _referenced(pool, pending)
+        for key in pending:
+            if key in referenced or deleted + failed >= batch_size:
+                continue
+            try:
+                blobs.delete(key)
+                deleted += 1
+            except Exception as exc:
+                logger.warning("retention: orphan blob delete failed: %s", type(exc).__name__)
+                failed += 1
+        pending.clear()
+
+    for blob in blobs.list(USERS_PREFIX):
+        if blob.uploaded_at >= cutoff:
+            continue
+        pending.append(blob.key)
+        if len(pending) >= batch_size:
+            flush()
+            if deleted + failed >= batch_size:
+                return deleted, failed
+    if pending:
+        flush()
+    return deleted, failed
+
+
 def cleanup_expired(pool: ConnectionPool, blobs: BlobStore, settings: Settings, now: datetime) -> CleanupResult:
     """Run every retention rule once at time `now` (timezone-aware; injectable for tests)."""
     _require_aware(now)
@@ -133,7 +186,13 @@ def cleanup_expired(pool: ConnectionPool, blobs: BlobStore, settings: Settings, 
         """Abandoned uploads rule."""
         result.uploads_deleted = purge_abandoned_uploads(pool, settings, now)
 
-    rules: dict[str, Callable[[], None]] = {"raw_files": raw, "threads": threads, "logs": logs, "uploads": uploads}
+    def orphans() -> None:
+        """Orphan blob sweep."""
+        result.orphan_blobs_deleted, result.orphan_blobs_failed = sweep_orphan_blobs(pool, blobs, settings, now)
+
+    # Cheap SQL rules first; the Blob-bound rules last (M8 of the review).
+    rules: dict[str, Callable[[], None]] = {"logs": logs, "uploads": uploads, "threads": threads, "raw_files": raw,
+                                            "orphan_blobs": orphans}
     for name, rule in rules.items():
         try:
             rule()

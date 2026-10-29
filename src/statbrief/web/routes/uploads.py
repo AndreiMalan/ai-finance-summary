@@ -155,7 +155,8 @@ def _discard_blob(rt: Runtime, key: str) -> None:
     """Best-effort blob delete (cleanup paths must not mask the original outcome)."""
     try:
         rt.blobs.delete(key)
-    except Exception as exc:  # orphan left for the retention job; log only the class (no key/user data)
+    except Exception as exc:  # orphan swept later by the retention job (orphan sweep, after BLOB_ORPHAN_GRACE_HOURS)
+        # or by account deletion (owner-prefix sweep); log only the class (no key/user data)
         logger.warning("blob delete failed: %s", type(exc).__name__)
 
 

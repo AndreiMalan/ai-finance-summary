@@ -15,6 +15,7 @@ CHECKPOINT_TABLES = ("checkpoint_writes", "checkpoint_blobs", "checkpoints")
 STORE_TABLE = "store"
 PREFS_NAMESPACE = "prefs"  # M7 PreferencesRepo: namespace (PREFS_NAMESPACE, user_id)
 _NS_SEP = "."  # LangGraph's PostgresStore joins namespace parts with "."
+_UUID_RE = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"  # canonical uuid text (constant)
 
 
 def _existing(conn: Connection, tables: tuple[str, ...]) -> list[str]:
@@ -59,7 +60,9 @@ def stale_thread_ids(conn: Connection, inactive_before: datetime, limit: int) ->
         return []
     threads = " UNION ".join(f"SELECT DISTINCT thread_id FROM {t}" for t in tables)
     rows = conn.execute(
-        f"SELECT t.thread_id FROM ({threads}) t LEFT JOIN reports r ON r.id::text = t.thread_id "
+        # The CASE guards the cast (non-uuid thread ids are orphans) and lets the join use the reports PK.
+        f"SELECT t.thread_id FROM ({threads}) t LEFT JOIN reports r ON r.id = CASE WHEN t.thread_id ~* "
+        f"'{_UUID_RE}' THEN t.thread_id::uuid END "
         "WHERE r.id IS NULL OR r.last_activity_at < %s ORDER BY t.thread_id LIMIT %s",
         (inactive_before, limit)).fetchall()
     return [r["thread_id"] for r in rows]

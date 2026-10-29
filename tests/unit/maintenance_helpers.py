@@ -31,6 +31,10 @@ class RecordingBlobs:
         """Delegate."""
         return self.inner.get(key)
 
+    def list(self, prefix):
+        """Delegate."""
+        return self.inner.list(prefix)
+
     def delete(self, key):
         """Fail for chosen keys, else record and delegate."""
         if self.before_delete:

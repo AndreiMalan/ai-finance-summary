@@ -61,6 +61,8 @@ def test_raw_files_of_approved_reports_expire_7_days_after_approval(ctx):
     expired = file_with_blob(pool, blobs, a.id, report(pool, a.id, last_activity=days(8), approved=days(8)))
     # long inactive but approved recently: the approval rule applies, so the file is kept
     kept = file_with_blob(pool, blobs, a.id, report(pool, a.id, last_activity=days(40), approved=days(6)))
+    with pool.connection() as c:  # both files were uploaded before their report's approval
+        c.execute("UPDATE files SET created_at = %s", (days(41),))
     cleanup_expired(pool, blobs, s, NOW)
     assert _purged(pool, expired.file_id) and not _exists(blobs, expired.blob_key)
     assert not _purged(pool, kept.file_id) and _exists(blobs, kept.blob_key)
@@ -167,3 +169,62 @@ def test_naive_clock_rejected(ctx):
     pool, blobs, s, _ = ctx
     with pytest.raises(ValueError):
         cleanup_expired(pool, blobs, s, datetime(2026, 1, 1))
+
+
+def _age(blobs, key: str, hours: float) -> None:
+    """Backdate a local blob's modification time (its upload time) by `hours`."""
+    import os
+
+    t = (NOW - timedelta(hours=hours)).timestamp()
+    os.utime(blobs.root / key, (t, t))
+
+
+def test_orphan_blobs_are_swept_after_the_grace_period(ctx):
+    """Blobs no files/report_versions row references are deleted once older than BLOB_ORPHAN_GRACE_HOURS."""
+    pool, blobs, s, a = ctx
+    rid = report(pool, a.id)
+    ref = file_with_blob(pool, blobs, a.id, rid)
+    old_orphan = blobs.put(f"users/{a.id}/reports/{rid}/lost/a.csv", b"x", "text/csv")
+    new_orphan = blobs.put(f"users/{a.id}/reports/{rid}/lost/b.csv", b"x", "text/csv")
+    for key, hours in ((ref.blob_key, 48), (old_orphan, 25), (new_orphan, 23)):
+        _age(blobs, key, hours)
+    result = cleanup_expired(pool, blobs, s, NOW)
+    assert result.orphan_blobs_deleted == 1 and result.orphan_blobs_failed == 0
+    assert not _exists(blobs, old_orphan) and _exists(blobs, new_orphan) and _exists(blobs, ref.blob_key)
+
+
+def test_export_blobs_are_not_orphans(ctx):
+    """A blob referenced by report_versions is kept by the sweep."""
+    from statbrief.export.bundle import ReportBundle
+    from statbrief.export.format import ExportOptions
+    from statbrief.export.store import save_exports
+    from statbrief.storage.report_versions import ReportVersionRepo
+
+    pool, blobs, s, a = ctx
+    rid = report(pool, a.id)
+    save_exports(pool, blobs, a.id, ReportBundle.example().model_copy(update={"report_id": rid}), ["pdf"],
+                 ExportOptions())
+    key = ReportVersionRepo(pool).list_for_report(a.id, rid)[0].blob_key
+    _age(blobs, key, 1000)
+    assert cleanup_expired(pool, blobs, s, NOW).orphan_blobs_deleted == 0 and _exists(blobs, key)
+
+
+def test_files_added_after_approval_get_their_own_retention_window(ctx):
+    """A file uploaded after the approval cutoff is not purged with the report's older files."""
+    pool, blobs, s, a = ctx
+    rid = report(pool, a.id, last_activity=days(1), approved=days(10))
+    older = file_with_blob(pool, blobs, a.id, rid)
+    newer = file_with_blob(pool, blobs, a.id, rid)
+    with pool.connection() as c:
+        c.execute("UPDATE files SET created_at = %s WHERE id = %s", (days(9), older.file_id))
+        c.execute("UPDATE files SET created_at = %s WHERE id = %s", (days(2), newer.file_id))
+    cleanup_expired(pool, blobs, s, NOW)
+    assert _purged(pool, older.file_id) and not _purged(pool, newer.file_id)
+
+
+def test_non_uuid_thread_ids_are_orphans(ctx, db_url):
+    """A thread whose id is not a report uuid is treated as an orphan (no cast error)."""
+    pool, blobs, s, _ = ctx
+    add_thread(db_url, "spike-thread")
+    result = cleanup_expired(pool, blobs, s, NOW)
+    assert result.failed_rules == [] and thread_rows(db_url, "spike-thread") == 0

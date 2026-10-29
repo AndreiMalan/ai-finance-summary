@@ -113,7 +113,8 @@ class Settings(BaseSettings):
 
     # Exports (M9). Presentation only: stored and exported values are never rounded.
     export_default_decimals: int = Field(2, ge=0, le=6)  # decimals for a number that no claim text states
-    export_chart_max_series: int = Field(6, ge=1, le=20)  # lines per PDF chart (series with most points first)
+    # lines per PDF chart (series with most points first); at most the 6 distinct colours of the PDF palette
+    export_chart_max_series: int = Field(6, ge=1, le=6)
 
     # Retention (M9, D-009 / AC 50). Every period is env-configurable.
     retention_unfinished_days: int = Field(30, ge=1)  # raw files of unapproved reports, after last activity
@@ -121,6 +122,7 @@ class Settings(BaseSettings):
     checkpoint_retention_days: int = Field(30, ge=1)  # LangGraph threads, after the report's last activity
     log_retention_days: int = Field(14, ge=1)  # run_events, login_attempts, usage_events
     upload_abandon_hours: int = Field(24, ge=1)  # staged chunked uploads never completed
+    blob_orphan_grace_hours: int = Field(24, ge=1)  # unreferenced blobs older than this are swept
     retention_batch_size: int = Field(500, ge=1)  # rows (and blobs) handled per rule per cleanup run
 
     @field_validator("session_secret")

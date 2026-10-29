@@ -117,3 +117,38 @@ def test_purged_files_are_not_deleted_again(ctx):
     recording = RecordingBlobs(blobs)
     delete_report(pool, recording, a.id, r1)
     assert files[0].blob_key not in recording.deleted and len(recording.deleted) == 1  # only the export
+
+
+def test_account_deletion_sweeps_unreferenced_blobs_under_the_owner_prefix(ctx):
+    """A blob orphaned earlier (no row references it) is removed with the account; bob's blobs stay."""
+    pool, blobs, _, a, b, (r1, _, rb), files = ctx
+    orphan = blobs.put(f"users/{a.id}/reports/{r1}/lost/old.csv", b"x", "text/csv")
+    bobs = blobs.put(f"users/{b.id}/reports/{rb}/lost/keep.csv", b"x", "text/csv")
+    delete_account(pool, blobs, a.id)
+    assert orphan not in _stored(blobs) and bobs in _stored(blobs)
+    assert not [k for k in _stored(blobs) if k.startswith(f"users/{a.id}/")]
+
+
+def test_report_deletion_sweeps_the_report_prefix_only(ctx):
+    """An orphan under the deleted report's prefix goes; one under the user's other report stays."""
+    pool, blobs, _, a, _, (r1, r2, _), _ = ctx
+    gone = blobs.put(f"users/{a.id}/reports/{r1}/lost/x.csv", b"x", "text/csv")
+    kept = blobs.put(f"users/{a.id}/reports/{r2}/lost/y.csv", b"x", "text/csv")
+    delete_report(pool, blobs, a.id, r1.upper())  # non-canonical id form is normalised
+    assert gone not in _stored(blobs) and kept in _stored(blobs)
+
+
+def test_listing_failure_keeps_the_database(ctx, monkeypatch):
+    """If the owner prefix cannot be listed, deletion stops before any DB change (Blob first)."""
+    pool, blobs, _, a, _, _, _ = ctx
+    monkeypatch.setattr(blobs, "list", lambda prefix: (_ for _ in ()).throw(RuntimeError("down")))
+    with pytest.raises(DeletionIncomplete):
+        delete_account(pool, blobs, a.id)
+    assert _count(pool, "SELECT count(*) AS n FROM users WHERE id = %s", a.id) == 1
+
+
+def test_delete_report_normalises_the_thread_id(ctx):
+    """An upper-case report id still deletes the report's checkpoint thread (thread_id is canonical text)."""
+    pool, blobs, url, a, _, (r1, _, _), _ = ctx
+    assert delete_report(pool, blobs, a.id, r1.upper()) is True
+    assert thread_rows(url, r1) == 0

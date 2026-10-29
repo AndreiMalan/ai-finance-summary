@@ -4,7 +4,9 @@
   request (no header, wrong secret, or CRON_SECRET unset) gets 401 and nothing runs.
 - `POST /account/delete` (form: `password`, `confirm` = "DELETE"): deletes the logged-in user's account
   and everything it owns (Blob objects first). The password is checked like a login (same throttle). The
-  shared demo account cannot be deleted. The settings page that calls it is M8.
+  shared demo account cannot be deleted. The settings page that calls it is M8. Known trade-off: a wrong
+  password counts as a failed login for the owner's email, so a holder of the session can lock the owner's
+  login for LOGIN_WINDOW_MINUTES (acceptable for the demo; throttle by user id if that changes).
 - `DELETE /api/reports/{report_id}`: deletes one report immediately (Blob objects first).
 CSRF: the state-changing routes require the `X-StatBrief-Client: 1` header (`Guard`, D-018), like the
 upload API. M8 introduces the form CSRF token and retrofits it here.
