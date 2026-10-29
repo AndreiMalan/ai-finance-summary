@@ -1,0 +1,679 @@
+{
+ "dataset": "REG_LUNAR",
+ "issuer": "IRS (fictional issuer, StatBrief demo data)",
+ "exported": "2025-02-14",
+ "records": [
+  {
+   "luna": "2024-01",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5358,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-01",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 261.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5376,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 262.5,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5468,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 262.3,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5537,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 262.5,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5615,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 262.9,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5668,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 263.0,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5737,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 264.1,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5813,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 264.1,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5896,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 263.8,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5949,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 264.0,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 5993,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 264.9,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Cluj",
+   "indicator": "CASTIG_NET",
+   "valoare": 6077,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Cluj",
+   "indicator": "SALARIATI",
+   "valoare": 265.3,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-01",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4460,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-01",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 178.4,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4520,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 178.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4579,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 178.9,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4652,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 179.1,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4634,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 179.2,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4762,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 179.1,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4746,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 179.6,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4816,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 179.8,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4894,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 179.8,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 4955,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 179.6,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 5002,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 180.5,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Iasi",
+   "indicator": "CASTIG_NET",
+   "valoare": 5093,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Iasi",
+   "indicator": "SALARIATI",
+   "valoare": 180.4,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-01",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5068,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-01",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 238.0,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5112,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 237.8,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5202,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 238.4,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5214,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 238.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5275,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 238.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5343,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 239.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5464,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 239.3,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5477,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 239.8,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5518,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 240.4,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5662,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 239.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5670,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 239.9,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Timis",
+   "indicator": "CASTIG_NET",
+   "valoare": 5767,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Timis",
+   "indicator": "SALARIATI",
+   "valoare": 241.1,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-01",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6367,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-01",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1094.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6447,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-02",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1096.5,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6556,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-03",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1097.3,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6666,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-04",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1098.3,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6686,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-05",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1099.0,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6771,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-06",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1100.2,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6877,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-07",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1101.2,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 6951,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-08",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1102.6,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 7001,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-09",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1103.9,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 7093,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-10",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1104.4,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 7224,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-11",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1105.7,
+   "um": "mii persoane"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Bucuresti",
+   "indicator": "CASTIG_NET",
+   "valoare": 7264,
+   "um": "lei"
+  },
+  {
+   "luna": "2024-12",
+   "judet": "Bucuresti",
+   "indicator": "SALARIATI",
+   "valoare": 1107.2,
+   "um": "mii persoane"
+  }
+ ]
+}

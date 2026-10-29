@@ -1,2 +1,4 @@
 # Generated PDFs are binary: never convert line endings (it would corrupt xref offsets).
 *.pdf binary
+# Vendored fonts (export/fonts) are binary.
+*.ttf binary

@@ -191,6 +191,11 @@ def _round_half_up(x: float, decimals: int) -> Decimal:
     return Decimal(repr(float(x))).quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)
 
 
+def round_half_up(x: float, decimals: int) -> Decimal:
+    """Public form of the verifier's rounding rule (half-up, D-010), shared with export presentation."""
+    return _round_half_up(x, decimals)
+
+
 def _matches(stated: Decimal, decimals: int, computed: float) -> bool:
     """True when `computed` rounded half-up at `decimals` equals `stated`."""
     try:

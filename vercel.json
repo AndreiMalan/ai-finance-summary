@@ -4,6 +4,12 @@
   "regions": [
     "fra1"
   ],
+  "crons": [
+    {
+      "path": "/cron/cleanup",
+      "schedule": "0 3 * * *"
+    }
+  ],
   "functions": {
     "app.py": {
       "maxDuration": 300,

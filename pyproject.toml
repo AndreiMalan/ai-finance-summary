@@ -26,13 +26,14 @@ dependencies = [
     "langchain-openai==1.7.2",
     "pandas==2.3.3",
     "langchain==1.4.7",
+    "reportlab==5.1.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-statbrief = ["storage/migrations/*.sql", "web/templates/*.html", "web/static/**/*", "ingest/data/*.csv"]
+statbrief = ["storage/migrations/*.sql", "web/templates/*.html", "web/static/**/*", "ingest/data/*.csv", "export/fonts/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -1,0 +1,317 @@
+{
+ "version": "2.0",
+ "class": "dataset",
+ "label": "Harmonised index of consumer prices (HICP) - ECOICOP ver.2 - indices and rates of change, monthly data",
+ "source": "ESTAT",
+ "updated": "2026-10-16T23:00:00+0200",
+ "value": {
+  "0": 112.29,
+  "1": 112.76,
+  "2": 113.23,
+  "3": 113.7,
+  "4": 114.34,
+  "5": 114.62,
+  "6": 115.15,
+  "7": 115.35,
+  "8": 116.31,
+  "9": 117.85,
+  "10": 118.15,
+  "11": 118.76,
+  "12": 120.42,
+  "13": 121.68,
+  "14": 124.05,
+  "15": 127.0,
+  "16": 128.55,
+  "17": 129.55,
+  "18": 130.14,
+  "19": 130.72,
+  "20": 131.94,
+  "21": 133.72,
+  "22": 135.39,
+  "23": 135.55,
+  "24": 136.61,
+  "25": 137.95,
+  "26": 139.13,
+  "27": 140.21,
+  "28": 140.89,
+  "29": 141.55,
+  "30": 141.76,
+  "31": 142.86,
+  "32": 144.04,
+  "33": 144.87,
+  "34": 144.72,
+  "35": 145.05,
+  "36": 146.64,
+  "37": 147.78,
+  "38": 148.44,
+  "39": 148.97,
+  "40": 149.02,
+  "41": 149.11,
+  "42": 149.98,
+  "43": 150.4,
+  "44": 151.01,
+  "45": 152.08,
+  "46": 152.57,
+  "47": 152.96
+ },
+ "id": [
+  "freq",
+  "unit",
+  "coicop18",
+  "geo",
+  "time"
+ ],
+ "size": [
+  1,
+  1,
+  1,
+  1,
+  48
+ ],
+ "dimension": {
+  "freq": {
+   "label": "Time frequency",
+   "category": {
+    "index": {
+     "M": 0
+    },
+    "label": {
+     "M": "Monthly"
+    }
+   }
+  },
+  "unit": {
+   "label": "Unit of measure",
+   "category": {
+    "index": {
+     "I15": 0
+    },
+    "label": {
+     "I15": "Index, 2015=100"
+    }
+   }
+  },
+  "coicop18": {
+   "label": "Classification of individual consumption by purpose (COICOP) - 2018",
+   "category": {
+    "index": {
+     "TOTAL": 0
+    },
+    "label": {
+     "TOTAL": "Total"
+    }
+   }
+  },
+  "geo": {
+   "label": "Geopolitical entity (reporting)",
+   "category": {
+    "index": {
+     "RO": 0
+    },
+    "label": {
+     "RO": "Romania"
+    }
+   }
+  },
+  "time": {
+   "label": "Time",
+   "category": {
+    "index": {
+     "2021-01": 0,
+     "2021-02": 1,
+     "2021-03": 2,
+     "2021-04": 3,
+     "2021-05": 4,
+     "2021-06": 5,
+     "2021-07": 6,
+     "2021-08": 7,
+     "2021-09": 8,
+     "2021-10": 9,
+     "2021-11": 10,
+     "2021-12": 11,
+     "2022-01": 12,
+     "2022-02": 13,
+     "2022-03": 14,
+     "2022-04": 15,
+     "2022-05": 16,
+     "2022-06": 17,
+     "2022-07": 18,
+     "2022-08": 19,
+     "2022-09": 20,
+     "2022-10": 21,
+     "2022-11": 22,
+     "2022-12": 23,
+     "2023-01": 24,
+     "2023-02": 25,
+     "2023-03": 26,
+     "2023-04": 27,
+     "2023-05": 28,
+     "2023-06": 29,
+     "2023-07": 30,
+     "2023-08": 31,
+     "2023-09": 32,
+     "2023-10": 33,
+     "2023-11": 34,
+     "2023-12": 35,
+     "2024-01": 36,
+     "2024-02": 37,
+     "2024-03": 38,
+     "2024-04": 39,
+     "2024-05": 40,
+     "2024-06": 41,
+     "2024-07": 42,
+     "2024-08": 43,
+     "2024-09": 44,
+     "2024-10": 45,
+     "2024-11": 46,
+     "2024-12": 47
+    },
+    "label": {
+     "2021-01": "2021-01",
+     "2021-02": "2021-02",
+     "2021-03": "2021-03",
+     "2021-04": "2021-04",
+     "2021-05": "2021-05",
+     "2021-06": "2021-06",
+     "2021-07": "2021-07",
+     "2021-08": "2021-08",
+     "2021-09": "2021-09",
+     "2021-10": "2021-10",
+     "2021-11": "2021-11",
+     "2021-12": "2021-12",
+     "2022-01": "2022-01",
+     "2022-02": "2022-02",
+     "2022-03": "2022-03",
+     "2022-04": "2022-04",
+     "2022-05": "2022-05",
+     "2022-06": "2022-06",
+     "2022-07": "2022-07",
+     "2022-08": "2022-08",
+     "2022-09": "2022-09",
+     "2022-10": "2022-10",
+     "2022-11": "2022-11",
+     "2022-12": "2022-12",
+     "2023-01": "2023-01",
+     "2023-02": "2023-02",
+     "2023-03": "2023-03",
+     "2023-04": "2023-04",
+     "2023-05": "2023-05",
+     "2023-06": "2023-06",
+     "2023-07": "2023-07",
+     "2023-08": "2023-08",
+     "2023-09": "2023-09",
+     "2023-10": "2023-10",
+     "2023-11": "2023-11",
+     "2023-12": "2023-12",
+     "2024-01": "2024-01",
+     "2024-02": "2024-02",
+     "2024-03": "2024-03",
+     "2024-04": "2024-04",
+     "2024-05": "2024-05",
+     "2024-06": "2024-06",
+     "2024-07": "2024-07",
+     "2024-08": "2024-08",
+     "2024-09": "2024-09",
+     "2024-10": "2024-10",
+     "2024-11": "2024-11",
+     "2024-12": "2024-12"
+    }
+   }
+  }
+ },
+ "extension": {
+  "lang": "EN",
+  "description": "<p>The Harmonised Index of Consumer Prices (HICP) measures price changes of various consumer goods and services over time (inflation). This dataset is compiled according to the European Classification&nbsp;of Individual Consumption&nbsp;According to Purpose (ECOICOP)&nbsp;ver. 2, available in base years 2025=100 and 2015=100.&nbsp;&nbsp;</p><p>This dataset includes&nbsp;four monthly&nbsp;indicators:&nbsp;</p><ul><li>the index, measuring price changes in relation to a base year&nbsp;</li><li>the annual rate of change,&nbsp;representing the percentage change in a reference month compared to the same month of the previous year (also called annual inflation)&nbsp;</li><li>the monthly rate of change,&nbsp;representing the percentage change in consumer price indices in a reference month compared to the previous month (also called monthly inflation)</li><li>the 12-month average rate of change,&nbsp;comparing the average index over a 12-month period to the average index previous 12-month period.</li></ul><p><br></p><p>All the rates are calculated from the monthly HICP indices.&nbsp;</p>",
+  "id": "PRC_HICP_MINR",
+  "agencyId": "ESTAT",
+  "version": "1.0",
+  "datastructure": {
+   "id": "PRC_HICP_MINR",
+   "agencyId": "ESTAT",
+   "version": "25.0"
+  },
+  "annotation": [
+   {
+    "type": "CREATED",
+    "date": "2026-01-27T09:31:20+0100"
+   },
+   {
+    "type": "DISSEMINATION_DOI_XML",
+    "title": "<adms:identifier xmlns:adms=\"http://www.w3.org/ns/adms#\" xmlns:skos=\"http://www.w3.org/2004/02/skos/core.html\" xmlns:dct=\"http://purl.org/dc/terms/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><adms:Identifier rdf:about=\"https://doi.org/10.2908/PRC_HICP_MINR\"><skos:notation rdf:datatype=\"http://purl.org/spar/datacite/doi\">10.2908/PRC_HICP_MINR</skos:notation><dct:creator rdf:resource=\"http://publications.europa.eu/resource/authority/corporate-body/ESTAT\"/><dct:issued rdf:datatype=\"http://www.w3.org/2001/XMLSchema#date\">2026-01-27</dct:issued></adms:Identifier></adms:identifier>"
+   },
+   {
+    "type": "DISSEMINATION_EXPLANATORY_LINK",
+    "title": "text-category",
+    "href": "https://ec.europa.eu/eurostat/databrowser-backend/api/public/explanatory-notes/get/Info_note_HICP_COICOP18_20260128.pdf",
+    "text": "Information note"
+   },
+   {
+    "type": "DISSEMINATION_EXPLANATORY_LINK",
+    "title": "text-category",
+    "href": "https://ec.europa.eu/eurostat/databrowser-backend/api/public/explanatory-notes/get/Info_note_HICP_COICOP18_20260128.pdf"
+   },
+   {
+    "type": "DISSEMINATION_EXPLANATORY_LINK",
+    "title": "text-category",
+    "href": "https://ec.europa.eu/eurostat/databrowser-backend/api/public/explanatory-notes/get/Info_note_HICP_COICOP18_20260128.pdf"
+   },
+   {
+    "type": "DISSEMINATION_OBJECT_TYPE",
+    "title": "DATASET"
+   },
+   {
+    "type": "DISSEMINATION_TIMESTAMP_DATA",
+    "date": "2026-10-16T23:00:00+0200"
+   },
+   {
+    "type": "DISSEMINATION_TIMESTAMP_GLOBAL",
+    "date": "2026-10-16T23:00:00+0200"
+   },
+   {
+    "type": "DISSEMINATION_TIMESTAMP_PLANNED",
+    "date": "2026-10-16T23:00:00+0200"
+   },
+   {
+    "type": "ESMS_HTML",
+    "title": "Explanatory texts (metadata)",
+    "href": "https://ec.europa.eu/eurostat/cache/metadata/en/prc_hicp_esms.htm"
+   },
+   {
+    "type": "ESMS_SDMX",
+    "title": "Explanatory texts (metadata)",
+    "href": "https://ec.europa.eu/eurostat/api/dissemination/files?file=metadata/prc_hicp_esms.sdmx.zip"
+   },
+   {
+    "type": "OBS_COUNT",
+    "title": "22480929"
+   },
+   {
+    "type": "OBS_PERIOD_OVERALL_LATEST",
+    "title": "2026-09"
+   },
+   {
+    "type": "OBS_PERIOD_OVERALL_OLDEST",
+    "title": "1996-01"
+   },
+   {
+    "type": "SOURCE_INSTITUTIONS",
+    "text": "Eurostat"
+   },
+   {
+    "type": "UPDATE_DATA",
+    "date": "2026-10-16T23:00:00+0200"
+   },
+   {
+    "type": "UPDATE_STRUCTURE",
+    "date": "2026-10-02T11:00:00+0200"
+   }
+  ],
+  "positions-with-no-data": {
+   "freq": [],
+   "unit": [],
+   "coicop18": [],
+   "geo": [],
+   "time": []
+  }
+ }
+}
