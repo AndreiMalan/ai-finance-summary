@@ -16,10 +16,11 @@ def _public_tables(url: str) -> set[str]:
 
 
 def test_migrations_apply_once(db_url):
-    """First run applies every bundled migration (001-005) in order; second run applies nothing."""
+    """First run applies every bundled migration (001-006) in order; second run applies nothing."""
     with connect(db_url) as conn:
         assert run_migrations(conn) == [
             "001_auth_limits", "002_reports_files", "003_api_cache", "004_knowledge_base", "005_run_events",
+            "006_report_run",
         ]
         assert run_migrations(conn) == []
         row = conn.execute("SELECT count(*) AS n FROM users").fetchone()
