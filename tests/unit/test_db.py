@@ -20,7 +20,7 @@ def test_migrations_apply_once(db_url):
     with connect(db_url) as conn:
         assert run_migrations(conn) == [
             "001_auth_limits", "002_reports_files", "003_api_cache", "004_knowledge_base", "005_run_events",
-            "007_report_run",
+            "006_report_versions", "007_report_run",
         ]
         assert run_migrations(conn) == []
         row = conn.execute("SELECT count(*) AS n FROM users").fetchone()

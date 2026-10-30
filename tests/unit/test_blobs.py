@@ -122,3 +122,46 @@ def test_vercel_delete_absent_is_silent(monkeypatch):
 
     monkeypatch.setattr(blobs, "_vercel_sync", lambda: SimpleNamespace(delete_blob=_missing))
     VercelBlobStore().delete("users/u/nope")
+
+
+def test_local_list_by_prefix_with_upload_time(tmp_path):
+    """list(prefix) yields every key under the prefix with a timezone-aware upload time."""
+    from datetime import timezone
+
+    store = LocalBlobStore(tmp_path)
+    store.put("users/u1/reports/r1/f1/a.csv", b"1", "text/csv")
+    store.put("users/u1/reports/r2/f2/b.csv", b"2", "text/csv")
+    store.put("users/u10/reports/r3/f3/c.csv", b"3", "text/csv")
+    listed = list(store.list("users/u1/"))
+    assert sorted(b.key for b in listed) == ["users/u1/reports/r1/f1/a.csv", "users/u1/reports/r2/f2/b.csv"]
+    assert all(b.uploaded_at.tzinfo is not None for b in listed)
+    assert [b.key for b in store.list("users/u1/reports/r2/")] == ["users/u1/reports/r2/f2/b.csv"]
+    assert list(store.list("users/none/")) == []
+
+
+def test_vercel_list_uses_sdk_query_with_prefix(monkeypatch):
+    """VercelBlobStore.list follows the SDK's paginated query_blobs with the literal prefix."""
+    from datetime import datetime, timezone
+
+    seen = {}
+
+    def query_blobs(prefix=None, page_size=None, cursor=None):
+        """Fake SDK listing."""
+        seen["prefix"] = prefix
+        return iter([SimpleNamespace(pathname="users/u1/x-abc.csv", uploaded_at=datetime(2026, 1, 1)),
+                     SimpleNamespace(pathname="users/u1/y.csv", uploaded_at=datetime(2026, 1, 2, tzinfo=timezone.utc))])
+
+    monkeypatch.setattr(blobs, "_vercel_sync", lambda: SimpleNamespace(query_blobs=query_blobs))
+    listed = list(VercelBlobStore().list("users/u1/"))
+    assert seen["prefix"] == "users/u1/" and [b.key for b in listed] == ["users/u1/x-abc.csv", "users/u1/y.csv"]
+    assert all(b.uploaded_at.tzinfo is not None for b in listed)  # naive SDK times are read as UTC
+
+
+def test_owner_prefix():
+    """owner_prefix scopes to a user or one report and validates ids like blob_key."""
+    from statbrief.storage.blobs import owner_prefix
+
+    assert owner_prefix("u1") == "users/u1/"
+    assert owner_prefix("u1", "r1") == "users/u1/reports/r1/"
+    with pytest.raises(ValueError):
+        owner_prefix("../x")

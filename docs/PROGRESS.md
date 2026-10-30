@@ -8,13 +8,13 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ```state
 milestone: M7a (M1–M6 merged)
 task: 1-6
-task_title: M7a LangGraph graph core — developer running
-phase: implementing
+task_title: M7b review 6.5/10 (C1 run lock vs Neon pooler) — fixing, then re-review
+phase: fixing
 branch: m7-graph
 base_commit: f81aa17
-last_verified_commit: f81aa17
+last_verified_commit: 7c0417c
 plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7a developer running in worktree D:/AI_Finance_summary-m7 (branch m7-graph). When it reports: single Opus review, fixes, then M7b (tasks 7–10) on the same branch, review, merge into main, full suite, push. Then M8 web UI plan.
+next_action: M7 developer fixing M7b review (C1 lease row, I1 resume tied to interrupt id, I2 fork at fan-out, I3 canonical report id, I4 node-aware budget, I5 migration 007_report_run + merge main). Then re-review (D-026, Critical), merge m7-graph into main, full suite, push. M8a running in parallel on m8-ui (told about interrupt_id contract); merge M7 fixes into m8-ui after.
 updated: 2026-10-29
 ```
 
@@ -36,6 +36,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
+| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 44a8a7d | ✅ tasks 1–4 merged to main (1175 tests); tasks 5–7 after M8 |
+| M8a UI wizard 1–4 | D:/AI_Finance_summary-m8 | m8-ui | 2efdd3d (m7-graph + main, migration 007_report_run) | 🔄 developer running |
 | M7 LangGraph | D:/AI_Finance_summary-m7 | m7-graph | f81aa17 | 🔄 M7a developer running |
 | M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | ✅ merged to main (1045 tests) |
 | M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | ed3017e | ✅ merged to main (961 tests) |
@@ -99,3 +101,10 @@ Resume rule: for each stream, check its branch log + uncommitted files in its wo
 | Production deploy | ✅ https://ai-finance-summary.vercel.app (M1) |
 | DEMO_USER_PASSWORD ≥ 10 chars | ⬜ user to fix in Vercel |
 | OpenAI API key | ⬜ needed at M6 |
+
+## User actions — deferred to the end (user decision 2026-10-29)
+Do not block or remind mid-build; present this list once after M9.
+1. Vercel env `DEMO_USER_PASSWORD` ≥ 10 chars (Production) → redeploy → /healthz shows `"demo_user":"ok"`.
+2. OpenAI project key with a monthly budget limit → `OPENAI_API_KEY` in Vercel (Production + Preview) and local `.env` (never in chat).
+3. Run `scripts/index_knowledge_base.py` against Neon once the key exists (embeddings; FTS works without).
+4. Live smoke test of the full flow on production (upload sample → API fetch → resolve → draft → approve → export).

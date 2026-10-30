@@ -4,10 +4,19 @@
   "regions": [
     "fra1"
   ],
+  "crons": [
+    {
+      "path": "/cron/cleanup",
+      "schedule": "0 3 * * *"
+    }
+  ],
   "functions": {
     "app.py": {
       "maxDuration": 300,
-      "excludeFiles": "{tests/**,docs/**,node_modules/**,scripts/**,knowledge_base/**,sample_data/**,.venv/**,.devdb/**,.superpowers/**,src/statbrief/web/static/src/**,.claude/**,.pytest_cache/**,.env*,requirements-dev.txt,CLAUDE.md}"
+      "excludeFiles": "{tests/**,docs/**,node_modules/**,scripts/**,knowledge_base/**,sample_data/**,.venv/**,.devdb/**,.superpowers/**,src/statbrief/web/static/src/**,.claude/**,.pytest_cache/**,.env*,requirements-dev.txt,CLAUDE.md}",
+      "regions": [
+        "fra1"
+      ]
     }
   }
 }
