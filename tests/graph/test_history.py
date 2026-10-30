@@ -43,7 +43,7 @@ def test_history_lists_interrupts_and_drafts(at_review):
     graph = state_graph(resources(world, Script()))
     entries = list_checkpoints(graph, world.report_id, world.settings)
     assert entries[0].interrupt == "review" and entries[0].has_draft and entries[0].next == ["human_review"]
-    assert entries[-1].has_draft is False and len(entries) >= 8
+    assert entries[-1].has_draft is False and [e.next[0] for e in entries] == ["human_review", "drafting", "retrieval", "analyze_dispatch"]
     assert [e.step for e in entries] == sorted([e.step for e in entries], reverse=True)
     draft = get_checkpoint_draft(graph, world.report_id, entries[0].checkpoint_id, world.settings)
     assert draft.caveats[-1] == "First draft."

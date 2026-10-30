@@ -2,8 +2,8 @@
 
 - `list_checkpoints`: the thread's *forkable* checkpoints, newest first (`get_state_history`, at most
   HISTORY_LIMIT): id, step, the node due next, time, status, whether a draft exists, which interrupt (if any)
-  was pending. Only checkpoints whose next step is exactly one node reached by an edge are listed and can
-  be forked.
+  was pending. Only the safe resume points (`FORK_POINTS`: before analysis, retrieval, drafting and the
+  review) are listed and can be forked.
 - `get_checkpoint_draft`: the draft stored in one checkpoint (prior drafts for the History tab).
 - `fork_from`: `update_state(<old checkpoint config>, {})` creates a new checkpoint as a child of the chosen
   one; it becomes the thread's latest and the next run segment continues from it (e.g. re-drafting from the
@@ -48,15 +48,17 @@ class CheckpointInfo(BaseModel):
 
 
 PULL = "__pregel_pull"  # LangGraph's path marker of a task reached by an edge (Send tasks are "push")
+# The safe resume points (D-039): before analysis, before retrieval, before drafting, before the review. Each
+# is reached from a single static node, so `update_state(old, {})` re-derives exactly that next step.
+# Elsewhere a fork can dead-end: inside a Send fan-out (packets are not carried over) or at the fan-in
+# (`aggregate_metrics`, last written by Send tasks), and `__start__` has no values to fork from.
+FORK_POINTS: frozenset[str] = frozenset({"analyze_dispatch", "retrieval", "drafting", "human_review"})
 
 
 def forkable(snap: StateSnapshot) -> bool:
-    """True when the checkpoint's next step is exactly one node reached by an edge.
-
-    Not forkable: the end of the run, a fan-out (several tasks), or a task created by `Send` (even a single
-    one: its packet would not survive `update_state`).
-    """
-    return len(snap.next) == 1 and all(t.path[:1] == (PULL,) for t in snap.tasks)
+    """True when the checkpoint's next step is exactly one allow-listed resume point reached by an edge."""
+    return (len(snap.next) == 1 and snap.next[0] in FORK_POINTS and bool(snap.values)
+            and all(t.path[:1] == (PULL,) for t in snap.tasks))
 
 
 def _info(snap: StateSnapshot) -> CheckpointInfo:
@@ -100,13 +102,19 @@ def get_checkpoint_draft(graph: CompiledStateGraph, report_id: str, checkpoint_i
     return _snapshot(graph, report_id, checkpoint_id, settings).values.get("draft")
 
 
-def fork_from(graph: CompiledStateGraph, report_id: str, checkpoint_id: str, settings: Settings) -> str:
-    """Make the chosen checkpoint the start of a new branch; returns the new (latest) checkpoint id.
-
-    NotForkable for a checkpoint inside a fan-out step or at the end of the run.
-    """
+def validate_fork(graph: CompiledStateGraph, report_id: str, checkpoint_id: str, settings: Settings) -> StateSnapshot:
+    """The checkpoint a fork would start from; UnknownCheckpoint / NotForkable (nothing is written)."""
     snap = _snapshot(graph, report_id, checkpoint_id, settings)
     if not forkable(snap):
         raise NotForkable(checkpoint_id)
+    return snap
+
+
+def fork_from(graph: CompiledStateGraph, report_id: str, checkpoint_id: str, settings: Settings) -> str:
+    """Make the chosen checkpoint the start of a new branch; returns the new (latest) checkpoint id.
+
+    UnknownCheckpoint / NotForkable (see `validate_fork`) before anything is written.
+    """
+    snap = validate_fork(graph, report_id, checkpoint_id, settings)
     new_config = graph.update_state(snap.config, {})
     return new_config["configurable"]["checkpoint_id"]

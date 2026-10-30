@@ -175,9 +175,11 @@ Rationale: M7a implementation and review (M1, M3, M5, M6, M9).
 2026-10-30 ·
 - **Run lease.** One running segment or fork per report. It is a lease on the `reports` row: `run_lease_token` and `run_lease_until` (migration 007).
   - Acquire: one atomic `UPDATE … WHERE id AND user_id AND (until IS NULL OR until < now()) RETURNING`.
-  - Renew: after every saved checkpoint.
+  - Renew: after every saved checkpoint, sub-graph checkpoints included (a heartbeat inside long steps).
   - Release: by token in `finally`, including when the event generator is closed.
-  - Duration: `SEGMENT_BUDGET_S + RUN_LEASE_MARGIN_S`.
+  - Duration from each renewal: `FUNCTION_MAX_DURATION_S + RUN_LEASE_MARGIN_S` (330 s), so it outlives the
+    function and expires shortly after a kill. If a client disconnects mid-step, release waits for the
+    generator's finalization after that step (or expiry).
 
   Session advisory locks are not used: through Neon's transaction-mode pooler they lose mutual exclusion and leak (M7b review C1). A dead instance's lease expires by itself.
 - **Queued answers bound to their interrupt.** `POST /resume` takes `{interrupt_id, payload}`.
@@ -187,13 +189,13 @@ Rationale: M7a implementation and review (M1, M3, M5, M6, M9).
   - A fork drops any queued answer.
 
   This means a stale tab can never approve a later round (review I1). EventSource is GET-only, so answers are queued and the next GET segment resumes with them. Run parameters live in `reports.params`.
-- **Fork rule.** Only checkpoints whose next step is exactly one node reached by an edge are listed and forkable. A fan-out step (`Send` packets, even a single one) or the end of a run is refused with 400. `update_state` does not carry `Send` packets, so such a fork would be a dead branch (review I2). A fork takes the lease and consumes one `RUNS_PER_HOUR` slot.
+- **Fork rule.** Only an allow-list of safe resume points is listed and forkable: before analysis (`analyze_dispatch`), before retrieval, before drafting and before the review (`FORK_POINTS`); everything else is refused with 400. `update_state` does not carry `Send` packets, and the fan-in checkpoint (`aggregate_metrics`) was last written by Send tasks, so forks there leave a dead branch (review I2, I2b). A fork takes the lease, then validates, then consumes one `RUNS_PER_HOUR` slot (429 leaves the report unchanged), then forks and drops the queued answer (I6).
 - **Canonical report id.** Each route resolves the report row once and uses `str(row["id"])` for `thread_id`, the lease and every repo call. Another spelling of the UUID reaches the same thread, and a non-UUID is 404 (review I3).
 - **Time budget.**
   - The budget is checked only right after a saved top-level checkpoint that is newer than the segment's start: no new step starts once `elapsed + MAX_NODE_S > SEGMENT_BUDGET_S`.
   - Every segment persists at least one step. Stopping right after an `updates` chunk would drop the step being saved, and a segment that always stops there never progresses.
-  - Settings validate `MAX_NODE_S < SEGMENT_BUDGET_S` and `SEGMENT_BUDGET_S + SEGMENT_SAFETY_MARGIN_S < 300`.
-  - A step that is still killed loses only itself: the previous checkpoint resumes (review I4).
+  - Settings validate `MAX_NODE_S < SEGMENT_BUDGET_S` and `SEGMENT_BUDGET_S + SEGMENT_SAFETY_MARGIN_S < 300` (the margin is the setup and teardown reserve).
+  - A top-level sub-graph step (drafting with revisions, ingestion) can still exceed `MAX_NODE_S`. If it is killed, only the work since the last saved checkpoint (sub-graph checkpoints included) is lost, and the next segment resumes there (review I4, I7).
 - **Model failures** (`MAX_MODEL_RETRIES`, Task 10) route to `fail_safe`. A database failure outside `validate_normalize` ends the segment with an `error` event and a `segment_error` row in run_events (exception type only). It is not written to the graph state, because `update_state` would fork the thread.
 
 Rationale: M7b review C1, I1–I4 and m2–m5. The serverless runtime (Vercel functions with Neon's pooler) admits no session state, and every state transition must be checkpointed before a request ends.

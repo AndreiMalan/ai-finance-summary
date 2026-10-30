@@ -212,3 +212,60 @@ def test_quoted_answer_matches_the_pending_interrupt(combined):
     script.replies.append(_draft(world))
     review = _segment(world, script)[-1]
     assert quoted(world, {"action": "approve"})["interrupt_id"] == review.data["interrupt_id"]
+
+
+# --- M7b re-review I2b / I6 / I7 ----------------------------------------------------------------------------------
+
+FORK_POINTS = {"analyze_dispatch", "retrieval", "drafting", "human_review"}
+
+
+def test_only_safe_resume_points_are_listed_and_each_one_runs_on(combined):
+    """I2b: history lists only the allow-listed points; a fork at each of them reaches a review again."""
+    world, script = combined, Script()
+    script.replies.append(_draft(world, "Original."))
+    _segment(world, script)
+    graph = state_graph(resources(world, Script()))
+    listed = list_checkpoints(graph, world.report_id, world.settings)
+    assert {c.next[0] for c in listed} == FORK_POINTS
+    raw = list(graph.get_state_history(graph_config(world.report_id, world.settings)))
+    fan_in = next(s for s in raw if s.next == ("aggregate_metrics",)).config["configurable"]["checkpoint_id"]
+    with pytest.raises(NotForkable):
+        fork_from(graph, world.report_id, fan_in, world.settings)
+    for point in sorted(FORK_POINTS):
+        target = next(c for c in list_checkpoints(graph, world.report_id, world.settings) if c.next == [point])
+        fork_from(graph, world.report_id, target.checkpoint_id, world.settings)
+        if point != "human_review":
+            script.replies.append(_draft(world, f"Fork at {point.replace('_', ' ')}."))
+        events = _segment(world, script)
+        assert events[-1].type == "interrupt" and events[-1].data["kind"] == "review", (point, events[-1])
+
+
+def test_lease_outlives_the_function_and_is_renewed_inside_drafting(combined, monkeypatch):
+    """I7: lease >= maxDuration + margin; sub-graph checkpoints inside one drafting step renew it."""
+    from statbrief.config import FUNCTION_MAX_DURATION_S
+    from statbrief.graph.runner import lease_seconds
+    world = combined
+    assert lease_seconds(resources(world, Script())) >= FUNCTION_MAX_DURATION_S + world.settings.run_lease_margin_s
+    renewals: list[str] = []
+    original = ReportRepo.renew_lease
+
+    def spy(self, report_id, token, seconds):
+        """Record where in the run each renewal happened (the draft count so far)."""
+        renewals.append(state_marker["phase"])
+        return original(self, report_id, token, seconds)
+
+    state_marker = {"phase": "before drafting"}
+    monkeypatch.setattr(ReportRepo, "renew_lease", spy)
+    script = Script()
+
+    def wrong_then_mark():
+        """First draft states a wrong number (forces a revise inside the same drafting step)."""
+        state_marker["phase"] = "inside drafting"
+        return report_call(draft_for(pp_metric(world, "IRS_UNEMP"), "0.9"))
+
+    script.replies.extend([wrong_then_mark, _draft(world)])
+    events = _segment(world, script)
+    assert events[-1].data["kind"] == "review"
+    # draft -> verify_claims -> revise -> verify_claims are sub-graph checkpoints of ONE top-level step.
+    assert renewals.count("inside drafting") >= 3
+

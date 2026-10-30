@@ -23,7 +23,6 @@ M8 CSRF scheme replaces it.
 Report ids are canonicalised once (`_own_report` returns the row; `str(row["id"])` is used for the thread,
 the lease and every repository call), so another spelling of the same UUID can never open a second run.
 """
-from typing import Annotated, Any
 
 from typing import Annotated, Any
 
@@ -37,7 +36,7 @@ from statbrief.auth.users import User
 from statbrief.domain.report import ReportParams
 from statbrief.graph.builder import graph_config
 from statbrief.graph.history import (NotForkable, UnknownCheckpoint, fork_from, get_checkpoint_draft,
-                                     list_checkpoints)
+                                     list_checkpoints, validate_fork)
 from statbrief.graph.nodes_review import ReviewPayload
 from statbrief.graph.nodes_validate import ResolvePayload
 from statbrief.graph.preferences import PreferencesRepo
@@ -190,16 +189,17 @@ def fork(report_id: str, checkpoint_id: str, request: Request, user: UserDep, rt
     with run_lease(res, user.id, rid) as token:
         if token is None:
             raise HTTPException(status_code=409, detail="the report is running")
-        try:
-            new_id = fork_from(graph, rid, checkpoint_id, res.settings)
+        try:  # 1. validate (nothing written yet)
+            validate_fork(graph, rid, checkpoint_id, res.settings)
         except UnknownCheckpoint:
             raise HTTPException(status_code=404, detail="checkpoint not found") from None
         except NotForkable:
             raise HTTPException(status_code=400, detail="this step cannot start a new branch") from None
         now = res.now()
-        try:
+        try:  # 2. the hourly run limit: a refused fork leaves the report exactly as it was
             consume(rt.pool, user.id, KIND_REPORT_RUN, res.settings.runs_per_hour, now - RUN_WINDOW, now)
         except LimitExceeded as exc:
             raise HTTPException(status_code=429, detail=f"{exc.limit} report runs per hour reached") from None
-        ReportRepo(rt.pool).take_pending_resume(user.id, rid)
+        new_id = fork_from(graph, rid, checkpoint_id, res.settings)  # 3. fork
+        ReportRepo(rt.pool).take_pending_resume(user.id, rid)  # 4. the old branch's answer no longer applies
     return {"checkpoint_id": new_id, "stream": f"/api/reports/{rid}/run/stream"}

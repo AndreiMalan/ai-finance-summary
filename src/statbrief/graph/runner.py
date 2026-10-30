@@ -6,17 +6,21 @@ is rebuilt per segment (`prepare_run`).
 
 One segment (or fork) at a time per report: a **run lease** on the report row (`run_lease`), taken with one
 atomic UPDATE when free or expired, renewed after every streamed step, released by token in `finally`
-(D-039). It works through Neon's transaction-mode pooler (no session state) and expires by itself after
-SEGMENT_BUDGET_S + RUN_LEASE_MARGIN_S when an instance is frozen or killed. A second caller gets
-`already_running` (R5).
+(D-039). It works through Neon's transaction-mode pooler (no session state). Every saved checkpoint,
+sub-graph checkpoints included, renews it for FUNCTION_MAX_DURATION_S + RUN_LEASE_MARGIN_S, so it never
+expires while its function may still run and expires shortly after a kill. A second caller gets
+`already_running` (R5). If the client disconnects while a step is still executing, the generator cannot
+be closed at once; it releases the lease when it is finalized after that step, or the lease expires.
 
 Time budget (R4): checked right after each saved top-level checkpoint newer than the segment's starting
 step (`stream_mode="checkpoints"`; the re-emitted starting checkpoint does not count): no
 further step starts when elapsed + MAX_NODE_S would pass SEGMENT_BUDGET_S (event `continue`). Stopping only
 there means every segment persists at least one step (stopping right after an `updates` chunk would drop
 the step being saved, and a segment that always stopped there would never progress). MAX_NODE_S < SEGMENT_BUDGET_S and SEGMENT_BUDGET_S + SEGMENT_SAFETY_MARGIN_S < maxDuration are
-validated by Settings. A node that still overruns (the function is killed) loses only its own step: the
-checkpoint of the previous step is intact and the next segment re-runs it.
+validated by Settings (the safety margin is the reserve for setup and teardown of a segment). A top-level
+sub-graph step (drafting with revisions, ingestion) can still exceed MAX_NODE_S; if the function is
+killed, only the sub-graph step in flight is lost: the next segment resumes from the last saved checkpoint
+(of the sub-graph, too).
 
 Input of a segment:
 - a queued answer `{"interrupt_id", "payload"}` (`take_resume()`, stored by POST /resume): resumed with
@@ -47,6 +51,7 @@ from langgraph.types import Command
 from pydantic import BaseModel
 
 from statbrief.auth.limits import KIND_REPORT_RUN, LimitExceeded, consume
+from statbrief.config import FUNCTION_MAX_DURATION_S
 from statbrief.domain.report import ReportParams
 from statbrief.graph.runtime import PreparedRun, RunResources, prepare_run
 from statbrief.llm.models import LLMNotConfigured, friendly_llm_error
@@ -85,8 +90,9 @@ class SseEvent(BaseModel):
 
 
 def lease_seconds(res: RunResources) -> float:
-    """How long a run lease lasts: SEGMENT_BUDGET_S + RUN_LEASE_MARGIN_S."""
-    return res.settings.segment_budget_s + res.settings.run_lease_margin_s
+    """How long a run lease lasts from its last renewal: the function limit + RUN_LEASE_MARGIN_S, so it never
+    expires while its function can still run, and expires soon after a kill."""
+    return FUNCTION_MAX_DURATION_S + res.settings.run_lease_margin_s
 
 
 @contextmanager
@@ -118,10 +124,14 @@ def _start_input(user_id: str, report_id: str, params: dict[str, Any] | None) ->
     return {"report_id": report_id, "user_id": user_id, "params": ReportParams.model_validate(params)}
 
 
-def interrupt_event(value: Any, interrupt_id: str, node: str | None = None) -> SseEvent:
-    """The `interrupt` event: the JSON interrupt value plus the id an answer must quote."""
-    return SseEvent(type="interrupt", node=node, data={**(value if isinstance(value, dict) else {"value": value}),
-                                                       "interrupt_id": interrupt_id})
+INTERRUPT_NODES = {"resolve": "resolve_gate", "review": "human_review"}
+
+
+def interrupt_event(value: Any, interrupt_id: str) -> SseEvent:
+    """The `interrupt` event: the JSON interrupt value plus the id an answer must quote; `node` is the node
+    that waits (the same whether the interrupt is new or shown again)."""
+    data = {**(value if isinstance(value, dict) else {"value": value}), "interrupt_id": interrupt_id}
+    return SseEvent(type="interrupt", node=INTERRUPT_NODES.get(data.get("kind")), data=data)
 
 
 def run_segment(res: RunResources, user_id: str, report_id: str, *, params: dict[str, Any] | None,
@@ -147,7 +157,7 @@ def _segment(res: RunResources, user_id: str, report_id: str, token: str, params
                 and answer.get("payload")):
             graph_input: Any = Command(resume=answer["payload"])
         elif pending is not None:  # no answer, or a stale one (another round / branch): ask again
-            yield interrupt_event(pending.value, pending.id, snapshot.next[0] if snapshot.next else None)
+            yield interrupt_event(pending.value, pending.id)
             return
         elif not snapshot.values:
             graph_input = _start_input(user_id, report_id, params)
@@ -197,15 +207,17 @@ def _stream(res: RunResources, run: PreparedRun, report_id: str, token: str, gra
                 yield SseEvent(type="progress", node=chunk.get("node"), message=chunk.get("message"))
                 continue
             if mode == "checkpoints":
-                # Budget and lease are checked only right after a top-level checkpoint was SAVED: closing the
-                # stream at any other point would drop the step being finished, and a segment that always
-                # stops there would never progress.
-                step = (chunk.get("metadata") or {}).get("step")
-                if namespace or interrupted or step is None or step <= start_step:  # not new progress
-                    continue
-                if not repo.renew_lease(report_id, token, lease_seconds(res)):
+                # Heartbeat: every saved checkpoint, sub-graph ones included, renews the lease, so a long
+                # top-level step (drafting with revisions) keeps it. Renewing never closes the stream.
+                if not interrupted and not repo.renew_lease(report_id, token, lease_seconds(res)):
                     yield SseEvent(type="error", message=LEASE_LOST)
                     return
+                # The budget is checked only right after a NEW top-level checkpoint was saved: closing the
+                # stream at any other point would drop the step being finished, and a segment that always
+                # stopped there would never progress.
+                step = (chunk.get("metadata") or {}).get("step")
+                if namespace or interrupted or step is None or step <= start_step:
+                    continue
                 if clock() - start + reserve > budget_s:  # another long step might not fit
                     yield SseEvent(type="continue", message="Still working: continuing in a new request.")
                     return

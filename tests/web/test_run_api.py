@@ -195,3 +195,29 @@ def test_fork_inside_a_fan_out_is_400(app_client):
     fan_out = next(s for s in raw if "analyze_one" in s.next).config["configurable"]["checkpoint_id"]
     assert fan_out not in {e["checkpoint_id"] for e in client.get(f"/api/reports/{rid}/history").json()}
     assert client.post(f"/api/reports/{rid}/history/{fan_out}/fork", headers=H).status_code == 400
+
+
+def test_fork_over_the_hourly_limit_is_429_and_leaves_the_report_unchanged(settings, tmp_path):
+    """Re-review I6: the limit is checked before the fork; a 429 leaves the head and the queued answer."""
+    script = Script()
+    model = script.model()
+    with _make_client(settings, tmp_path, runs_per_hour=1) as client:
+        client.app.state.run_resources_factory = lambda rt: RunResources(
+            pool=rt.pool, settings=rt.settings, blobs=rt.blobs, model_factory=lambda s, cap: model,
+            embeddings_factory=lambda s: None, sleep=lambda s: None)
+        client.post("/signup", data={"email": "u@example.com", "password": PW})
+        rid = _report(client)
+        _upload(client, rid, "irs.csv", long_csv(unemp_rows()))
+        client.put(f"/api/reports/{rid}/params", json=PARAMS, headers=H)
+        script.replies.append(lambda: report_call(draft_for(_metric(client, rid), "0.6")))
+        review = events(client.get(f"/api/reports/{rid}/run/stream"))[-1]["data"]
+        assert client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": review["interrupt_id"],
+                                                               "payload": {"action": "approve"}},
+                           headers=H).status_code == 202
+        before = client.get(f"/api/reports/{rid}/history").json()
+        target = next(e for e in before if e["next"] == ["drafting"])
+        refused = client.post(f"/api/reports/{rid}/history/{target['checkpoint_id']}/fork", headers=H)
+        assert refused.status_code == 429
+        assert client.get(f"/api/reports/{rid}/history").json() == before
+        done = events(client.get(f"/api/reports/{rid}/run/stream"))
+        assert done[-1]["type"] == "done" and done[-1]["data"]["status"] == "approved"  # queued answer kept
