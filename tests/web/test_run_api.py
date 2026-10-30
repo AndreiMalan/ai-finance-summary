@@ -64,23 +64,27 @@ def test_full_run_over_http(app_client):
     evs = events(first)
     assert evs[0]["type"] == "started" and evs[-1]["type"] == "interrupt" and evs[-1]["data"]["kind"] == "resolve"
 
-    bad = client.post(f"/api/reports/{rid}/resume", json={"payload": {"bogus": 1}}, headers=H)
+    iid = evs[-1]["data"]["interrupt_id"]
+    bad = client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": iid, "payload": {"bogus": 1}}, headers=H)
     assert bad.status_code == 422 and any("bogus" in e for e in bad.json()["errors"])
-    assert client.post(f"/api/reports/{rid}/resume", json={"payload": {}}, headers=H).status_code == 422
-    ok = client.post(f"/api/reports/{rid}/resume", json={"payload": {"confirm_mappings": [fid]}}, headers=H)
+    assert client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": iid, "payload": {}},
+                       headers=H).status_code == 422
+    ok = client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": iid, "payload": {"confirm_mappings": [fid]}},
+                     headers=H)
     assert ok.status_code == 202 and ok.json()["queued"] == "resolve"
 
     script.replies.append(report_call(draft_for(_metric(client, rid), "0.6")))
     second = events(client.get(f"/api/reports/{rid}/run/stream"))
     assert second[-1]["type"] == "interrupt" and second[-1]["data"]["kind"] == "review"
     assert any(e["type"] == "progress" and e.get("node") == "draft" for e in second)
-    assert client.post(f"/api/reports/{rid}/resume", json={"payload": {"action": "approve"}},
+    review_id = second[-1]["data"]["interrupt_id"]
+    assert client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": review_id, "payload": {"action": "approve"}},
                        headers=H).status_code == 202
     third = events(client.get(f"/api/reports/{rid}/run/stream"))
     assert third[-1] == {"type": "done", "progress": 1.0, "data": {"status": "approved"}}
     assert client.get("/api/preferences").json()["formats"] == ["xlsx"]
     # Finished: answering again is a conflict, not a hang.
-    assert client.post(f"/api/reports/{rid}/resume", json={"payload": {"action": "approve"}},
+    assert client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": review_id, "payload": {"action": "approve"}},
                        headers=H).status_code == 409
 
 
@@ -89,13 +93,13 @@ def test_other_users_report_is_404_and_guard_applies(app_client):
     client, _ = app_client
     rid = _report(client)
     assert client.put(f"/api/reports/{rid}/params", json=PARAMS).status_code == 403
-    assert client.post(f"/api/reports/{rid}/resume", json={"payload": {"a": 1}}).status_code == 403
+    assert client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": "x", "payload": {"a": 1}}).status_code == 403
     client.post("/logout", headers=H)
     client.cookies.clear()
     assert client.post("/signup", data={"email": "other@example.com", "password": PW}).status_code == 303
     assert client.put(f"/api/reports/{rid}/params", json=PARAMS, headers=H).status_code == 404
     assert client.get(f"/api/reports/{rid}/run/stream").status_code == 404
-    assert client.post(f"/api/reports/{rid}/resume", json={"payload": {"action": "approve"}},
+    assert client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": "x", "payload": {"action": "approve"}},
                        headers=H).status_code == 404
 
 
@@ -106,7 +110,7 @@ def test_invalid_params_and_no_pending_interrupt(app_client):
     bad = {**PARAMS, "links": [{"upload_code": "A", "catalog_code": "HICP_YOY"},
                                {"upload_code": "A", "catalog_code": "UNEMP_RATE"}]}
     assert client.put(f"/api/reports/{rid}/params", json=bad, headers=H).status_code == 422
-    assert client.post(f"/api/reports/{rid}/resume", json={"payload": {"action": "approve"}},
+    assert client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": "x", "payload": {"action": "approve"}},
                        headers=H).status_code == 409
     evs = events(client.get(f"/api/reports/{rid}/run/stream"))
     assert [e["type"] for e in evs] == ["error"]
@@ -137,3 +141,57 @@ def test_history_routes_scoped_disabled_and_fork(app_client, settings, tmp_path)
         off.post("/signup", data={"email": "third@example.com", "password": PW})
         rid2 = _report(off)
         assert off.get(f"/api/reports/{rid2}/history").status_code == 404
+
+
+def test_resume_must_quote_the_pending_interrupt(app_client):
+    """Review I1: an answer quoting another interrupt (older round, other tab) is refused with 409."""
+    client, script = app_client
+    rid = _report(client)
+    _upload(client, rid, "irs.csv", long_csv(unemp_rows()))
+    client.put(f"/api/reports/{rid}/params", json=PARAMS, headers=H)
+    script.replies.append(lambda: report_call(draft_for(_metric(client, rid), "0.6")))
+    review = events(client.get(f"/api/reports/{rid}/run/stream"))[-1]["data"]
+    stale = client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": "not-the-current-one",
+                                                            "payload": {"action": "approve"}}, headers=H)
+    assert stale.status_code == 409 and "changed" in stale.json()["detail"]
+    ok = client.post(f"/api/reports/{rid}/resume", json={"interrupt_id": review["interrupt_id"],
+                                                         "payload": {"action": "approve"}}, headers=H)
+    assert ok.status_code == 202
+
+
+def test_report_id_is_canonicalised_and_non_uuids_are_404(app_client):
+    """Review I3: another spelling of the same UUID reaches the same thread and the same lease."""
+    client, script = app_client
+    rid = _report(client)
+    _upload(client, rid, "irs.csv", long_csv(unemp_rows()))
+    upper = rid.upper()
+    assert client.put(f"/api/reports/{upper}/params", json=PARAMS, headers=H).status_code == 200
+    script.replies.append(lambda: report_call(draft_for(_metric(client, rid), "0.6")))
+    assert events(client.get(f"/api/reports/{upper}/run/stream"))[-1]["data"]["kind"] == "review"
+    assert client.get(f"/api/reports/{rid}/history").json() == client.get(f"/api/reports/{upper}/history").json()
+    from statbrief.storage.repos import ReportRepo
+    repo = ReportRepo(_pool(client))
+    with _pool(client).connection() as c:
+        uid = str(c.execute("SELECT user_id FROM reports WHERE id = %s", (rid,)).fetchone()["user_id"])
+    assert repo.acquire_lease(uid, rid, "00000000-0000-0000-0000-0000000000cc", 60)
+    assert [e["type"] for e in events(client.get(f"/api/reports/{upper}/run/stream"))] == ["already_running"]
+    repo.release_lease(rid, "00000000-0000-0000-0000-0000000000cc")
+    assert client.get("/api/reports/not-a-uuid/run/stream").status_code == 404
+
+
+def test_fork_inside_a_fan_out_is_400(app_client):
+    """Review I2: a checkpoint whose next step is a Send fan-out cannot be forked (it is not listed either)."""
+    client, script = app_client
+    rid = _report(client)
+    _upload(client, rid, "irs.csv", long_csv(unemp_rows()))
+    client.put(f"/api/reports/{rid}/params", json=PARAMS, headers=H)
+    script.replies.append(lambda: report_call(draft_for(_metric(client, rid), "0.6")))
+    events(client.get(f"/api/reports/{rid}/run/stream"))
+    from statbrief.graph.builder import graph_config
+    from statbrief.graph.runtime import state_graph
+    res = client.app.state.run_resources_factory(client.app.state.runtime_holder.get())
+    raw = list(state_graph(res).get_state_history(graph_config(rid, res.settings)))
+    # One indicator x region pair: the fan-out has a single Send task, which must not be forkable either.
+    fan_out = next(s for s in raw if "analyze_one" in s.next).config["configurable"]["checkpoint_id"]
+    assert fan_out not in {e["checkpoint_id"] for e in client.get(f"/api/reports/{rid}/history").json()}
+    assert client.post(f"/api/reports/{rid}/history/{fan_out}/fork", headers=H).status_code == 400

@@ -13,7 +13,7 @@ from statbrief.graph.runner import run_segment
 from statbrief.graph.runtime import make_store, state_graph
 from statbrief.storage.repos import RunEventRepo
 from tests.graph.helpers import draft_for, long_csv, monthly, report_call
-from tests.graph.runkit import Script, resources
+from tests.graph.runkit import Script, queue_taker, resources
 
 UPLOAD = [round(6.0 + i * 0.137, 3) for i in range(13)]  # 2023-01 .. 2024-01, distinctive decimals
 ADJ = [round(1.234567 + i * 0.001, 6) for i in range(13)]  # val_adj_x: undocumented, never interpreted
@@ -49,7 +49,7 @@ def test_upload_plus_api_to_approved_export(world):
     def segment():
         """One run segment, answering with the queued resume (if any)."""
         return list(run_segment(res, world.user_id, world.report_id, params=params_json,
-                                take_resume=lambda: queue.pop() if queue else None, budget_s=240))
+                                take_resume=queue_taker(world, queue), budget_s=240))
 
     first = segment()
     gate = first[-1].data

@@ -246,3 +246,14 @@ def test_openai_key_is_secret(monkeypatch):
     s = Settings(database_url="postgresql://x/y", session_secret="s" * 32, _env_file=None)
     assert s.openai_api_key.get_secret_value() == "sk-test-123"
     assert "sk-test-123" not in repr(s)
+
+
+def test_segment_time_budget_settings_are_consistent():
+    """M7b review I4: MAX_NODE_S defaults to the LLM worst case and must fit the budget; budget + margin < 300."""
+    base = {"database_url": "postgresql://x/y", "session_secret": "s" * 32, "_env_file": None}
+    assert Settings(**base).max_node_s == 60 * 3 + 10
+    assert Settings(**base, llm_timeout_s=30, llm_max_retries=1).max_node_s == 70
+    with pytest.raises(ValidationError):
+        Settings(**base, max_node_s=240)  # not below SEGMENT_BUDGET_S
+    with pytest.raises(ValidationError):
+        Settings(**base, segment_budget_s=285)  # 285 + 20 margin >= 300

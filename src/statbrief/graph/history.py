@@ -1,12 +1,20 @@
 """History, replay and fork (AC 42, ENABLE_REPLAY): checkpoints of one report thread.
 
-- `list_checkpoints`: the top-level checkpoints of the thread, newest first (`get_state_history`): id, step,
-  the nodes due next, time, status, whether a draft exists and which interrupt (if any) was pending.
+- `list_checkpoints`: the thread's *forkable* checkpoints, newest first (`get_state_history`, at most
+  HISTORY_LIMIT): id, step, the node due next, time, status, whether a draft exists, which interrupt (if any)
+  was pending. Only checkpoints whose next step is exactly one node reached by an edge are listed and can
+  be forked.
 - `get_checkpoint_draft`: the draft stored in one checkpoint (prior drafts for the History tab).
-- `fork_from`: `update_state(<old checkpoint config>, {})` creates a new checkpoint as a child of the chosen one,
-  which becomes the thread's latest; the next run segment continues from it (e.g. re-drafting from the
-  checkpoint before drafting). API responses come from `api_cache`, so nothing is re-fetched.
-Only the report's own thread (thread_id = report_id) is ever read; callers check ownership first.
+- `fork_from`: `update_state(<old checkpoint config>, {})` creates a new checkpoint as a child of the chosen
+  one; it becomes the thread's latest and the next run segment continues from it (e.g. re-drafting from the
+  checkpoint before drafting). API responses come from the report's `api_cache` while it is kept, so a fork
+  normally re-fetches nothing.
+
+Why only single, edge-reached steps (D-039): `update_state` re-derives the next nodes from the graph's
+edges; the `Send` packets of a fan-out step (`analyze_one` x K, even when K = 1) are not carried over, so a fork there would leave a
+branch with nothing to run that reports "done" without metrics. A checkpoint before the fan-out
+(`analyze_dispatch`) re-plans it instead. Lookups use `get_state(thread_id + checkpoint_id)` and check
+that the returned checkpoint belongs to this thread; callers check report ownership first.
 """
 from datetime import datetime
 
@@ -23,6 +31,10 @@ class UnknownCheckpoint(KeyError):
     """No checkpoint with this id in the report's thread."""
 
 
+class NotForkable(ValueError):
+    """The checkpoint sits inside a fan-out step (or at the end): it cannot start a branch."""
+
+
 class CheckpointInfo(BaseModel):
     """One checkpoint as listed in the History tab."""
 
@@ -33,6 +45,18 @@ class CheckpointInfo(BaseModel):
     status: str | None
     has_draft: bool
     interrupt: str | None  # "resolve" / "review" when the run was waiting there
+
+
+PULL = "__pregel_pull"  # LangGraph's path marker of a task reached by an edge (Send tasks are "push")
+
+
+def forkable(snap: StateSnapshot) -> bool:
+    """True when the checkpoint's next step is exactly one node reached by an edge.
+
+    Not forkable: the end of the run, a fan-out (several tasks), or a task created by `Send` (even a single
+    one: its packet would not survive `update_state`).
+    """
+    return len(snap.next) == 1 and all(t.path[:1] == (PULL,) for t in snap.tasks)
 
 
 def _info(snap: StateSnapshot) -> CheckpointInfo:
@@ -46,16 +70,28 @@ def _info(snap: StateSnapshot) -> CheckpointInfo:
 
 
 def list_checkpoints(graph: CompiledStateGraph, report_id: str, settings: Settings) -> list[CheckpointInfo]:
-    """The thread's checkpoints, newest first."""
-    return [_info(s) for s in graph.get_state_history(graph_config(report_id, settings))]
+    """The thread's forkable checkpoints, newest first, at most HISTORY_LIMIT of them."""
+    out: list[CheckpointInfo] = []
+    for snap in graph.get_state_history(graph_config(report_id, settings)):
+        if forkable(snap):
+            out.append(_info(snap))
+            if len(out) >= settings.history_limit:
+                break
+    return out
 
 
 def _snapshot(graph: CompiledStateGraph, report_id: str, checkpoint_id: str, settings: Settings) -> StateSnapshot:
-    """The snapshot of one checkpoint of the thread; UnknownCheckpoint otherwise."""
-    for snap in graph.get_state_history(graph_config(report_id, settings)):
-        if snap.config["configurable"]["checkpoint_id"] == checkpoint_id:
-            return snap
-    raise UnknownCheckpoint(checkpoint_id)
+    """The snapshot of one checkpoint of this report's thread; UnknownCheckpoint otherwise."""
+    config = graph_config(report_id, settings)
+    config["configurable"]["checkpoint_id"] = checkpoint_id
+    try:
+        snap = graph.get_state(config)
+    except Exception:  # malformed id
+        raise UnknownCheckpoint(checkpoint_id) from None
+    found = snap.config.get("configurable", {}) if snap.config else {}
+    if not snap.values or found.get("thread_id") != report_id or found.get("checkpoint_id") != checkpoint_id:
+        raise UnknownCheckpoint(checkpoint_id)
+    return snap
 
 
 def get_checkpoint_draft(graph: CompiledStateGraph, report_id: str, checkpoint_id: str,
@@ -65,7 +101,12 @@ def get_checkpoint_draft(graph: CompiledStateGraph, report_id: str, checkpoint_i
 
 
 def fork_from(graph: CompiledStateGraph, report_id: str, checkpoint_id: str, settings: Settings) -> str:
-    """Make the chosen checkpoint the start of a new branch; returns the new (latest) checkpoint id."""
+    """Make the chosen checkpoint the start of a new branch; returns the new (latest) checkpoint id.
+
+    NotForkable for a checkpoint inside a fan-out step or at the end of the run.
+    """
     snap = _snapshot(graph, report_id, checkpoint_id, settings)
+    if not forkable(snap):
+        raise NotForkable(checkpoint_id)
     new_config = graph.update_state(snap.config, {})
     return new_config["configurable"]["checkpoint_id"]

@@ -130,8 +130,11 @@ def _save_preferences(state: ReportState) -> None:
 
 
 def export(state: ReportState, deps: GraphDeps, config: RunnableConfig) -> dict[str, Any]:
-    """Record that the approved report awaits export in the requested formats (M9 builds them) and save the
-    user's report defaults (long-term memory)."""
+    """Record that the approved report awaits export in the requested formats (M9 builds them), its approval
+    time (retention), and save the user's report defaults (long-term memory)."""
     _save_preferences(state)
-    return {"export": ExportStatus(state="pending", formats=list(state["params"].formats), requested_at=deps.now()),
+    now = deps.now()
+    if deps.mark_approved is not None:  # retention of raw files starts at the first approval (D-009, M9)
+        deps.mark_approved(state["user_id"], state["report_id"], now)
+    return {"export": ExportStatus(state="pending", formats=list(state["params"].formats), requested_at=now),
             "status": "approved"}

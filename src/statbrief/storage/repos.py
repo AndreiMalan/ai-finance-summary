@@ -108,6 +108,32 @@ class ReportRepo:
                 (rid, user_id)).fetchone()
         return row["pending_resume"] if row else None
 
+    def acquire_lease(self, user_id: str, report_id: str, token: str, seconds: float) -> bool:
+        """Take the report's run lease for `seconds` when it is free or expired; True when this caller won.
+
+        One atomic UPDATE (safe through a transaction-mode pooler): two concurrent callers cannot both win.
+        """
+        with self.pool.connection() as c:
+            row = c.execute(
+                "UPDATE reports SET run_lease_token = %s, run_lease_until = now() + make_interval(secs => %s) "
+                "WHERE id = %s AND user_id = %s AND (run_lease_until IS NULL OR run_lease_until < now()) "
+                "RETURNING id", (token, seconds, _uuid(report_id), user_id)).fetchone()
+        return row is not None
+
+    def renew_lease(self, report_id: str, token: str, seconds: float) -> bool:
+        """Extend the lease held with `token`; False when it was lost (expired and taken by someone else)."""
+        with self.pool.connection() as c:
+            row = c.execute("UPDATE reports SET run_lease_until = now() + make_interval(secs => %s) "
+                            "WHERE id = %s AND run_lease_token = %s RETURNING id",
+                            (seconds, _uuid(report_id), token)).fetchone()
+        return row is not None
+
+    def release_lease(self, report_id: str, token: str) -> None:
+        """Release the lease if `token` still holds it (a no-op for anyone else)."""
+        with self.pool.connection() as c:
+            c.execute("UPDATE reports SET run_lease_token = NULL, run_lease_until = NULL "
+                      "WHERE id = %s AND run_lease_token = %s", (_uuid(report_id), token))
+
     def touch(self, user_id: str, report_id: str) -> None:
         """Record activity (drives retention, D-009); no-op for reports the user does not own."""
         with self.pool.connection() as c:

@@ -6,7 +6,7 @@ from statbrief.graph.history import UnknownCheckpoint, fork_from, get_checkpoint
 from statbrief.graph.runner import run_segment
 from statbrief.graph.runtime import state_graph
 from tests.graph.helpers import draft_for, long_csv, monthly, report_call, unemp_rows
-from tests.graph.runkit import Script, pp_metric, resources
+from tests.graph.runkit import Script, pp_metric, queue_taker, resources
 
 PARAMS = ReportParams(mode="combined", indicators=["HICP_YOY", "IRS_UNEMP"], regions=["RO"],
                       period_from="2023-01", period_to="2024-01").model_dump(mode="json")
@@ -16,7 +16,7 @@ def _segment(world, script, resume=None):
     """Events of one run segment."""
     queue = [resume]
     return list(run_segment(resources(world, script), world.user_id, world.report_id, params=PARAMS,
-                            take_resume=lambda: queue.pop() if queue else None, budget_s=240))
+                            take_resume=queue_taker(world, queue), budget_s=240))
 
 
 def _draft(world, caveat):

@@ -2,10 +2,10 @@
 import json
 
 from statbrief.domain.report import ReportParams
-from statbrief.graph.runner import RUN_LOCK_NAMESPACE, SseEvent, run_segment
+from statbrief.graph.runner import SseEvent, run_segment
 from statbrief.storage.repos import ReportRepo, RunEventRepo
 from tests.graph.helpers import draft_for, long_csv, report_call, unemp_rows
-from tests.graph.runkit import Script, pp_metric, resources
+from tests.graph.runkit import Script, pp_metric, queue_taker, resources
 
 CRYPTIC = ("c1", "c2", "c3", "c4", "c5")
 PARAMS = ReportParams(mode="upload", indicators=["IRS_UNEMP"], regions=["RO"]).model_dump(mode="json")
@@ -15,7 +15,7 @@ def _segment(world, script, *, resume=None, budget_s=240.0, **settings):
     """All events of one segment."""
     queue = [resume]
     return list(run_segment(resources(world, script, **settings), world.user_id, world.report_id, params=PARAMS,
-                            take_resume=lambda: queue.pop() if queue else None, budget_s=budget_s))
+                            take_resume=queue_taker(world, queue), budget_s=budget_s))
 
 
 def _types(events):
@@ -54,15 +54,15 @@ def test_pending_interrupt_is_shown_again_and_a_queued_answer_resumes(world):
 
 
 def test_second_caller_gets_already_running(world):
-    """R5: while another session holds the report's run lock, a segment only reports already_running."""
+    """R5: while another holder has the report's run lease, a segment only reports already_running."""
     world.add_file("irs.csv", long_csv(unemp_rows()))
-    with world.pool.connection() as other:
-        other.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (RUN_LOCK_NAMESPACE, world.report_id))
-        try:
-            assert _types(_segment(world, Script())) == ["already_running"]
-        finally:
-            other.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", (RUN_LOCK_NAMESPACE, world.report_id))
-    assert _types(_segment(world, Script()))[0] == "started"  # the lock was released
+    repo = ReportRepo(world.pool)
+    assert repo.acquire_lease(world.user_id, world.report_id, "00000000-0000-0000-0000-0000000000aa", 60)
+    try:
+        assert _types(_segment(world, Script())) == ["already_running"]
+    finally:
+        repo.release_lease(world.report_id, "00000000-0000-0000-0000-0000000000aa")
+    assert _types(_segment(world, Script()))[0] == "started"  # the lease was released
 
 
 def test_budget_splits_the_run_into_resumable_segments(world):
@@ -70,7 +70,7 @@ def test_budget_splits_the_run_into_resumable_segments(world):
     world.add_file("cryptic.csv", long_csv(unemp_rows(), header=CRYPTIC))
     script = Script()
     segments = []
-    for _ in range(20):
+    for _ in range(40):
         events = _segment(world, script, budget_s=0.0)
         segments.append(events)
         if events[-1].type != "continue":

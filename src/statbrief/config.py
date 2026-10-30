@@ -10,6 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 SSE_DIAG_MAX_TOTAL_S = 290.0
 # Vercel function maxDuration (vercel.json, Hobby maximum); one graph segment must finish well inside it.
 FUNCTION_MAX_DURATION_S = 300.0
+# Extra seconds a model node needs beyond its LLM calls (database reads, verification) in the MAX_NODE_S default.
+MAX_NODE_EXTRA_S = 10.0
 # pgvector's HNSW index supports at most 2000 dimensions for the `vector` type.
 PGVECTOR_HNSW_MAX_DIMENSIONS = 2000
 
@@ -114,6 +116,12 @@ class Settings(BaseSettings):
     enable_replay: bool = True  # history, replay and fork from checkpoints (M7b)
     enable_draft_tools: bool = True  # let the model call the controlled tools while drafting (when it supports tools)
     segment_budget_s: float = Field(240.0, gt=0)  # wall-clock budget of one run segment (< FUNCTION_MAX_DURATION_S)
+    segment_safety_margin_s: float = Field(20.0, ge=0)  # SEGMENT_BUDGET_S + this must stay below maxDuration
+    # Longest one node may take (an LLM call with its retries); a segment does not start another step when
+    # elapsed + MAX_NODE_S would exceed SEGMENT_BUDGET_S. Default: LLM_TIMEOUT_S x (LLM_MAX_RETRIES + 1) + 10.
+    max_node_s: float | None = Field(None, gt=0)
+    run_lease_margin_s: float = Field(30.0, gt=0)  # run lease = SEGMENT_BUDGET_S + this (expires if a run dies)
+    history_limit: int = Field(100, ge=1)  # checkpoints listed in the History tab
     graph_recursion_limit: int = Field(60, ge=10)  # LangGraph super-steps per invocation
 
     cron_secret: SecretStr = SecretStr("")
@@ -206,8 +214,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _segment_within_max_duration(self) -> "Settings":
         """Reject a run-segment budget that would not end before the serverless function is killed."""
-        if self.segment_budget_s >= FUNCTION_MAX_DURATION_S:
-            raise ValueError(f"SEGMENT_BUDGET_S must be below {FUNCTION_MAX_DURATION_S:g} s")
+        if self.segment_budget_s + self.segment_safety_margin_s >= FUNCTION_MAX_DURATION_S:
+            raise ValueError(f"SEGMENT_BUDGET_S + SEGMENT_SAFETY_MARGIN_S must be below {FUNCTION_MAX_DURATION_S:g} s")
+        if self.max_node_s is None:
+            self.max_node_s = self.llm_timeout_s * (self.llm_max_retries + 1) + MAX_NODE_EXTRA_S
+        if self.max_node_s >= self.segment_budget_s:
+            raise ValueError("MAX_NODE_S must be below SEGMENT_BUDGET_S (a segment must fit at least one long node)")
         return self
 
     @property

@@ -28,6 +28,7 @@ from statbrief.sources.http import utc_now
 from statbrief.sources.results import FetchResult
 from statbrief.sources.worldbank import fetch_worldbank
 from statbrief.storage.blobs import BlobStore
+from statbrief.storage.report_versions import mark_approved
 from statbrief.storage.repos import ApiCacheRepo, FileRepo, MappingRepo, ObservationRepo, ValidationRepo
 
 
@@ -59,12 +60,15 @@ class GraphDeps:
     catalog: Mapping[str, IndicatorSpec] = field(default_factory=lambda: dict(CATALOG))
     now: Callable[[], datetime] = utc_now
     sleep: Callable[[float], None] = time.sleep
+    # Records a report's approval time (M9 retention starts there); None: not recorded (tests without M9).
+    mark_approved: Callable[[str, str, datetime], bool] | None = None
 
     @classmethod
     def from_pool(cls, pool: ConnectionPool, settings: Settings, *, blobs: BlobStore,
                   chat_model: BaseChatModel | None, retriever: Callable[[str], Sequence[RetrievedPassage]],
                   **kwargs: Any) -> "GraphDeps":
         """Deps with every repository on `pool`; other fields (http_client, fetchers, ...) via kwargs."""
+        kwargs.setdefault("mark_approved", lambda user_id, report_id, at: mark_approved(pool, user_id, report_id, at))
         return cls(settings=settings, files=FileRepo(pool), mappings=MappingRepo(pool),
                    validations=ValidationRepo(pool), observations=ObservationRepo(pool),
                    api_cache=ApiCacheRepo(pool), blobs=blobs, chat_model=chat_model, retriever=retriever, **kwargs)

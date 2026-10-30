@@ -63,7 +63,7 @@ AI_Finance_summary/
 │   │   ├── nodes.py            # top-level nodes (select_sources, normalize, resolve_gate, analyze, review, export, fail)
 │   │   ├── routing.py          # all conditional-edge functions (pure, unit-tested)
 │   │   ├── builder.py          # build_graph(checkpointer, store) -> CompiledStateGraph
-│   │   └── runner.py           # run_segment(): stream with time budget, lock, events -> SSE
+│   │   └── runner.py           # run_segment(): stream with time budget, run lease, events -> SSE
 │   ├── storage/
 │   │   ├── db.py               # psycopg pool (Neon pooled URL), migrations runner
 │   │   ├── migrations/*.sql    # users, reports, files, observations, run_events, rate_limits, report_versions
@@ -191,8 +191,8 @@ Large data (observations, raw files) is stored in Postgres/Blob; state carries r
  ─────────────                                 ─────────────────────────────                      ──────────────────
  Upload files ── POST /reports/{id}/files ──▶ sniff → Blob.put → FileRepo ───────────────────────▶ Blob (private), files
  Preview/map  ── GET  …/files/{f}/preview ──▶ readers + detect_schema → grid partial
- Run          ── GET  …/run/stream (SSE) ───▶ runner.run_segment(thread_id=report_id)
-                                                │  pg advisory lock, time budget
+ Run          ── GET  …/run/stream (SSE) ───▶ runner.run_segment(thread_id=canonical report_id)
+                                                │  run lease (reports row), time budget
                                                 ▼
  ┌──────────────────────────────── LangGraph StateGraph (checkpointed per super-step) ────────────────────────────┐
  │ select_sources                                                                                                 │
@@ -216,7 +216,7 @@ Large data (observations, raw files) is stored in Postgres/Blob; state carries r
  └────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
                                                 │ stream_mode=["updates","custom"] → SSE events → timeline partial
                                                 │ callbacks → run_events (redacted)
- Review form ── POST …/resume (Command) ──────▶ runner (next segment)
+ Review form ── POST …/resume {interrupt_id, payload} ─▶ reports.pending_resume ─▶ next segment
 ```
 
 ## 5. Key function signatures
@@ -250,7 +250,8 @@ def build_graph(checkpointer: BaseCheckpointSaver, store: BaseStore, deps: Graph
 def route_after_validation(state: ReportState) -> Literal["resolve_gate", "analyze_dispatch", "fail_safe"]
 def route_after_verify(state: ReportState) -> Literal["revise", "human_review", "fail_safe"]
 def route_after_review(state: ReportState) -> Literal["drafting", "export", "__end__"]
-async def run_segment(report_id: str, user: User, command: Command | None, budget_s: float) -> AsyncIterator[SseEvent]
+def run_segment(res: RunResources, user_id: str, report_id: str, *, params: dict | None,
+                take_resume: Callable[[], dict | None], budget_s: float) -> Iterator[SseEvent]  # D-039
 # export
 def build_pdf(bundle: ReportBundle) -> bytes
 def build_xlsx(bundle: ReportBundle) -> bytes
@@ -377,9 +378,9 @@ Each milestone gets its own detailed plan in `docs/superpowers/plans/` and every
 |---|---|---|---|
 | R1 | Bundle > Vercel limit (pandas 3 + langchain + reportlab + psycopg) | no community extras beyond loaders, exclude tests/docs via `excludeFiles`, measure in M1 | M1 |
 | R2 | SSE buffering on Vercel Python | explicit flush, `X-Accel-Buffering: no`; fallback to HTMX polling of `run_events` | M1 |
-| R3 | PostgresSaver over Neon pooler (prepared statements) | `prepare_threshold=None`; or direct (unpooled) URL for the checkpointer | M1 |
-| R4 | Long LLM call exceeds segment budget | per-call timeout (60 s), `max_retries=2`, segment budget 240 s < maxDuration 300 s | M6/M7 |
-| R5 | Concurrent resume of the same thread from two tabs | `pg_try_advisory_lock(hash(report_id))`; second tab gets "already running" | M7 |
+| R3 | PostgresSaver over Neon pooler (prepared statements) | `prepare_threshold=None`; or direct (unpooled) URL for the checkpointer; **pooler spike still pending** (scripts/check_checkpointer.py against Neon) | M1 |
+| R4 | Long LLM call exceeds segment budget | per-call timeout (60 s), `max_retries=2`; segment budget 240 s + safety margin 20 s < maxDuration 300 s; no new step once elapsed + MAX_NODE_S (default 60 × 3 + 10 = 190 s) > budget, checked after each saved checkpoint; a killed step re-runs from the previous checkpoint (D-039) | M6/M7 |
+| R5 | Concurrent resume of the same thread from two tabs | run lease on the report row (atomic UPDATE, token, expiry budget + margin; pooler-safe); second tab gets "already running"; answers bound to their interrupt id (D-039) | M7 |
 | R6 | Checkpoint bloat | state holds references; observations in tables | M7 |
 | R7 | `with_structured_output` provider differences | provider-agnostic via JSON-schema method + Pydantic validation + `include_raw` | M6 |
 | R8 | Eurostat API rate/latency, JSON-stat quirks | cache raw responses per report in DB (resume never refetches), backoff | M3 |
