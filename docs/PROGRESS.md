@@ -8,13 +8,13 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ```state
 milestone: M7a (M1–M6 merged)
 task: 1-6
-task_title: M7b done (7c0417c, 1152 tests) — single review running
-phase: reviewing
+task_title: M7b review 6.5/10 (C1 run lock vs Neon pooler) — fixing, then re-review
+phase: fixing
 branch: m7-graph
 base_commit: f81aa17
 last_verified_commit: 7c0417c
 plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7b review running (→ D:/AI_Finance_summary-m7/.superpowers/sdd/m7b-review.md). Known: renumber migration 006_report_run → 007 (main has 006_report_versions). Then developer fixes, merge m7-graph into main (expect conflicts config.py/.env.example/web/main.py/test_db.py), full suite, push; M8a already running in parallel (branch m8-ui from m7-graph+main; it renamed migration to 007_report_run — M7 fix must use the same name).
+next_action: M7 developer fixing M7b review (C1 lease row, I1 resume tied to interrupt id, I2 fork at fan-out, I3 canonical report id, I4 node-aware budget, I5 migration 007_report_run + merge main). Then re-review (D-026, Critical), merge m7-graph into main, full suite, push. M8a running in parallel on m8-ui (told about interrupt_id contract); merge M7 fixes into m8-ui after.
 updated: 2026-10-29
 ```
 
