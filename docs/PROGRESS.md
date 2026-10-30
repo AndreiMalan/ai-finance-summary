@@ -8,13 +8,13 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ```state
 milestone: M7a (M1–M6 merged)
 task: 1-6
-task_title: M7a re-review 8.5/10 approved — fixing I2–I4, then M7b tasks 7–10 (same developer, same branch)
-phase: implementing
+task_title: M7b done (7c0417c, 1152 tests) — single review running
+phase: reviewing
 branch: m7-graph
 base_commit: f81aa17
-last_verified_commit: f81aa17
+last_verified_commit: 7c0417c
 plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7 developer fixing M7a re-review I2 (window base), I3 (AC 22 gap-fill consent), I4 (skips to prompt/review), then implementing M7b (checkpointer, runner+SSE, history/replay, error routes). Then single review of M7b, fixes, merge m7-graph into main. M9 tasks 1–4 merged to main. M8 plan ready (2026-10-29-m8-web-ui.md).
+next_action: M7b review running (→ D:/AI_Finance_summary-m7/.superpowers/sdd/m7b-review.md). Known: renumber migration 006_report_run → 007 (main has 006_report_versions). Then developer fixes, merge m7-graph into main (expect conflicts config.py/.env.example/web/main.py/test_db.py), full suite, push; then M8a per docs/superpowers/plans/2026-10-29-m8-web-ui.md (CSRF retrofit on Guard-only routes from M7b + M9).
 updated: 2026-10-29
 ```
 
