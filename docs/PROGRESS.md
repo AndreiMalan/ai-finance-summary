@@ -14,7 +14,7 @@ branch: m7-graph
 base_commit: f81aa17
 last_verified_commit: 7c0417c
 plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7b review running (→ D:/AI_Finance_summary-m7/.superpowers/sdd/m7b-review.md). Known: renumber migration 006_report_run → 007 (main has 006_report_versions). Then developer fixes, merge m7-graph into main (expect conflicts config.py/.env.example/web/main.py/test_db.py), full suite, push; then M8a per docs/superpowers/plans/2026-10-29-m8-web-ui.md (CSRF retrofit on Guard-only routes from M7b + M9).
+next_action: M7b review running (→ D:/AI_Finance_summary-m7/.superpowers/sdd/m7b-review.md). Known: renumber migration 006_report_run → 007 (main has 006_report_versions). Then developer fixes, merge m7-graph into main (expect conflicts config.py/.env.example/web/main.py/test_db.py), full suite, push; M8a already running in parallel (branch m8-ui from m7-graph+main; it renamed migration to 007_report_run — M7 fix must use the same name).
 updated: 2026-10-29
 ```
 
@@ -37,6 +37,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
 | M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 44a8a7d | ✅ tasks 1–4 merged to main (1175 tests); tasks 5–7 after M8 |
+| M8a UI wizard 1–4 | D:/AI_Finance_summary-m8 | m8-ui | 2efdd3d (m7-graph + main, migration 007_report_run) | 🔄 developer running |
 | M7 LangGraph | D:/AI_Finance_summary-m7 | m7-graph | f81aa17 | 🔄 M7a developer running |
 | M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | ✅ merged to main (1045 tests) |
 | M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | ed3017e | ✅ merged to main (961 tests) |
