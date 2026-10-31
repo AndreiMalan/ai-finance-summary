@@ -8,13 +8,13 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ```state
 milestone: M8a (M1–M7 + M9 tasks 1–4 merged)
 task: 1-4
-task_title: M8a UI shell, CSRF, wizard steps 1–4 — developer running
-phase: implementing
+task_title: M8a done (merged with main at 44bb738, 1403 tests) — review running; M9 part 2 running in parallel
+phase: reviewing
 branch: m8-ui
 base_commit: 2efdd3d
-last_verified_commit: 2c43201
+last_verified_commit: 44bb738
 plan: docs/superpowers/plans/2026-10-29-m8-web-ui.md
-next_action: M7 merged into main (2c43201, 1298 tests). M8a developer running in D:/AI_Finance_summary-m8 (branch m8-ui). When it reports: merge main into m8-ui (brings M7 review fixes: resume {interrupt_id, payload}, lease, fork allow-list), single review, fixes, merge. Then M8b, then M9 tasks 5–7 (bundle-from-state + export node wiring, deploy docs, LaTeX concepts PDF, final review/QA).
+next_action: M8a review running (→ D:/AI_Finance_summary-m8/.superpowers/sdd/m8a-review.md); then fixes, M8b developer on same branch. M9 part 2 developer running in D:/AI_Finance_summary-m9 (export wiring bundle_from_state + export node, deploy.md/smoke.py/healthz, LaTeX concepts PDF with MiKTeX at D:/Latex/miktex). Merge order: M9 part 2 and M8 into main as each finishes; then final review + QA (M9 task 7).
 updated: 2026-10-31
 ```
 
@@ -36,8 +36,8 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
-| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 44a8a7d | ✅ tasks 1–4 merged to main (1175 tests); tasks 5–7 after M8 |
-| M8a UI wizard 1–4 | D:/AI_Finance_summary-m8 | m8-ui | 2efdd3d (m7-graph + main, migration 007_report_run) | 🔄 developer running |
+| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 45f5781 | ✅ tasks 1–4 merged; 🔄 part 2 (export wiring, deploy, concepts PDF) running |
+| M8a UI wizard 1–4 | D:/AI_Finance_summary-m8 | m8-ui | 2efdd3d (m7-graph + main, migration 007_report_run) | 🔄 done (44bb738, merged main) — in review |
 | M7 LangGraph | D:/AI_Finance_summary-m7 | m7-graph | f81aa17 | 🔄 M7a developer running |
 | M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | ✅ merged to main (1045 tests) |
 | M4 Analytics + verifier | D:/AI_Finance_summary-m4 | m4-analytics | ed3017e | ✅ merged to main (961 tests) |
