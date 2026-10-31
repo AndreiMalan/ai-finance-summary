@@ -6,16 +6,16 @@ This file is updated at **every** step transition (task dispatched, implemented,
 ## Current state
 
 ```state
-milestone: M7a (M1–M6 merged)
-task: 1-6
-task_title: M7b re-review 8.5/10 approved — fixing I2b fork allow-list, I6 fork limit order, I7 lease renewal
-phase: fixing
-branch: m7-graph
-base_commit: f81aa17
-last_verified_commit: 8a24282
-plan: docs/superpowers/plans/2026-10-29-m7-langgraph-workflow.md
-next_action: M7 developer fixing M7b re-review I2b/I6/I7 (no further re-review). Then merge m7-graph into main, full suite, push; then merge main into m8-ui (M8a running; reconcile resume contract {interrupt_id, payload}).
-updated: 2026-10-29
+milestone: M8a (M1–M7 + M9 tasks 1–4 merged)
+task: 1-4
+task_title: M8a UI shell, CSRF, wizard steps 1–4 — developer running
+phase: implementing
+branch: m8-ui
+base_commit: 2efdd3d
+last_verified_commit: 2c43201
+plan: docs/superpowers/plans/2026-10-29-m8-web-ui.md
+next_action: M7 merged into main (2c43201, 1298 tests). M8a developer running in D:/AI_Finance_summary-m8 (branch m8-ui). When it reports: merge main into m8-ui (brings M7 review fixes: resume {interrupt_id, payload}, lease, fork allow-list), single review, fixes, merge. Then M8b, then M9 tasks 5–7 (bundle-from-state + export node wiring, deploy docs, LaTeX concepts PDF, final review/QA).
+updated: 2026-10-31
 ```
 
 Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next task) … → `merging` → `done`.
