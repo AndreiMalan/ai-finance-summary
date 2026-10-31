@@ -403,3 +403,35 @@ def test_saving_mapping_invalidates_validation_and_observations(ctx):
     assert ObservationRepo(pool).list_for_report(a.id, ref.report_id) == []
     with pool.connection() as c:
         assert c.execute("SELECT status FROM files WHERE id = %s", (ref.file_id,)).fetchone()["status"] == "mapped"
+
+
+def _api_obs(oid, value, region="RO", ind="HICP"):
+    """One API observation (file-less row)."""
+    from datetime import datetime, timezone
+
+    from statbrief.domain.observation import ApiProvenance
+    prov = ApiProvenance(api_name="eurostat", series_id="prc?x=1", query_url="https://ec.europa.eu/x",
+                         retrieved_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    return Observation(obs_id=oid, indicator_code=ind, region_code=region, region_level="country", period="2024-01",
+                       frequency="M", value=value, unit="%", provenance=prov)
+
+
+def test_api_observations_upsert_scoped_and_never_overwrite_uploads(ctx):
+    """API rows are stored without a file, replaced on re-store, never overwrite an upload row, owner only."""
+    pool, a, b, rep = ctx
+    repo, rid = ObservationRepo(pool), str(rep["id"])
+    ref = _ref(a, rep)
+    FileRepo(pool).add(ref)
+    upload = _obs(ref, 1)
+    repo.replace_for_file(a.id, rid, ref.file_id, upload)
+    assert repo.upsert_api_observations(a.id, rid, [_api_obs("api_1", 2.0), _api_obs("api_2", 3.0, region="HU")]) == 2
+    repo.upsert_api_observations(a.id, rid, [_api_obs("api_1", 2.5)])
+    repo.upsert_api_observations(a.id, rid, [_api_obs(upload[0].obs_id, 99.0)])  # same id as the uploaded row
+    by_id = {o.obs_id: o for o in repo.list_for_report(a.id, rid)}
+    assert by_id["api_1"].value == 2.5 and by_id[upload[0].obs_id].value == upload[0].value
+    assert [o.obs_id for o in repo.list_for_series(a.id, rid, ["HICP"], "HU")] == ["api_2"]
+    assert repo.list_for_series(b.id, rid, ["HICP"], "HU") == []
+    with pytest.raises(PermissionError):
+        repo.upsert_api_observations(b.id, rid, [_api_obs("api_3", 1.0)])
+    with pytest.raises(ValueError):
+        repo.upsert_api_observations(a.id, rid, upload)

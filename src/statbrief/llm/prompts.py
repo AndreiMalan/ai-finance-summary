@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from statbrief.config import Settings
 from statbrief.domain.dataset import DetectedSchema
-from statbrief.domain.metrics import MetricResult, SignificantChange
+from statbrief.domain.metrics import MetricResult, MetricSkip, SignificantChange
 from statbrief.domain.observation import ApiProvenance, Observation
 from statbrief.domain.report import ReportDraft
 from statbrief.rag.retriever import RetrievedPassage
@@ -94,6 +94,9 @@ METRICS (metric_id | value | unit | observation_ids | formula):
 SIGNIFICANT CHANGES (metric_id | magnitude | rule):
 {significant_changes}
 
+NOT COMPUTED (kind | indicator | region | period | reason; mention material gaps as caveats, never estimate them):
+{metric_skips}
+
 SOURCES (ref_id | kind | label | locator):
 {sources}
 
@@ -141,7 +144,7 @@ INTERPRET_DATASET_PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 CONTEXT_VARIABLES: frozenset[str] = frozenset({
-    "regions", "period", "metrics_table", "significant_changes", "sources", "passages",
+    "regions", "period", "metrics_table", "significant_changes", "metric_skips", "sources", "passages",
     "column_descriptions", "undocumented_columns", "style_rules"})
 
 
@@ -189,7 +192,7 @@ def _unit_label(m: MetricResult) -> str:
 
 
 def format_metrics(metrics: Sequence[MetricResult], significant: Sequence[SignificantChange],
-                   settings: Settings) -> dict[str, str]:
+                   settings: Settings, skips: Sequence[MetricSkip] = ()) -> dict[str, str]:
     """The METRICS table and SIGNIFICANT CHANGES list, capped at PROMPT_MAX_METRICS.
 
     Significant metrics come first (largest magnitude first), then the rest by metric id; values are the
@@ -205,7 +208,19 @@ def format_metrics(metrics: Sequence[MetricResult], significant: Sequence[Signif
     if len(order) > len(shown):
         lines.append(f"- ({len(order) - len(shown)} more metrics not shown; use the list_available_metrics tool)")
     sig = [f"- {s.metric_id} | {s.magnitude!r} | {s.rule}" for s in flags if s.metric_id in shown]
-    return {"metrics_table": "\n".join(lines) or NONE, "significant_changes": "\n".join(sig) or NONE}
+    return {"metrics_table": "\n".join(lines) or NONE, "significant_changes": "\n".join(sig) or NONE,
+            "metric_skips": format_skips(skips, settings)}
+
+
+def format_skips(skips: Sequence[MetricSkip], settings: Settings) -> str:
+    """Metrics that were not computed, one compact line each (sorted), capped at PROMPT_MAX_SKIPS."""
+    rows = sorted({(s.indicator, s.region, s.kind, s.period or "-", _line(s.reason)) for s in skips})
+    shown = rows[:settings.prompt_max_skips]
+    lines = [f"- {kind} | {_line(ind)} | {_line(reg)} | {period} | {reason}"
+             for ind, reg, kind, period, reason in shown]
+    if len(rows) > len(shown):
+        lines.append(f"- ({len(rows) - len(shown)} more skipped metrics not shown)")
+    return "\n".join(lines) or NONE
 
 
 def _locator(p: RetrievedPassage) -> str:
@@ -246,11 +261,12 @@ def static_context(*, regions: Sequence[str], period: str, sources: Sequence[Sou
 def render_context(*, regions: Sequence[str], period: str, metrics: Sequence[MetricResult],
                    significant: Sequence[SignificantChange], sources: Sequence[SourceInfo],
                    passages: Sequence[RetrievedPassage], column_descriptions: Mapping[str, str],
-                   undocumented_columns: Iterable[str], settings: Settings) -> dict[str, str]:
+                   undocumented_columns: Iterable[str], settings: Settings,
+                   skips: Sequence[MetricSkip] = ()) -> dict[str, str]:
     """Every DRAFT_PROMPT variable, compact and deterministic (no raw rows; lists capped by Settings)."""
     return {**static_context(regions=regions, period=period, sources=sources,
                              column_descriptions=column_descriptions, undocumented_columns=undocumented_columns),
-            **format_metrics(metrics, significant, settings),
+            **format_metrics(metrics, significant, settings, skips),
             "passages": format_passages(passages, settings)}
 
 

@@ -8,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Upper bound (seconds) for one /_diag/sse stream: below Vercel's 300 s function maxDuration
 # (Hobby maximum, vercel.json) with a 10 s margin for cold start and response overhead.
 SSE_DIAG_MAX_TOTAL_S = 290.0
+# Vercel function maxDuration (vercel.json, Hobby maximum); one graph segment must finish well inside it.
+FUNCTION_MAX_DURATION_S = 300.0
+# Extra seconds a model node needs beyond its LLM calls (database reads, verification) in the MAX_NODE_S default.
+MAX_NODE_EXTRA_S = 10.0
 # pgvector's HNSW index supports at most 2000 dimensions for the `vector` type.
 PGVECTOR_HNSW_MAX_DIMENSIONS = 2000
 
@@ -88,6 +92,7 @@ class Settings(BaseSettings):
     top_movers: int = Field(3, ge=0)  # largest |YoY| per indicator and period across >= 2 regions (0 = off)
     max_revisions: int = Field(3, ge=0)  # verify -> revise cycles before safe failure (D-010, AC 27)
     max_parse_retries: int = Field(2, ge=0)  # retries of an unparseable LLM draft (D-010)
+    max_model_retries: int = Field(1, ge=0)  # node-level retries of a failed model call (after LLM_MAX_RETRIES)
 
     # LLM layer (M6). The chat model is built with init_chat_model(f"{llm_provider}:{llm_model}").
     llm_provider: Literal["openai"] = "openai"
@@ -103,7 +108,21 @@ class Settings(BaseSettings):
     max_tool_rows_per_turn: int = Field(400, ge=1)  # rows all query_observations calls of one tool loop may return
     prompt_max_metrics: int = Field(80, ge=1)  # metrics listed in a prompt (significant ones first)
     prompt_max_passages: int = Field(8, ge=1)  # retrieved passages included in a prompt
+    prompt_max_skips: int = Field(40, ge=0)  # "not computed" metric lines in a prompt (reasons for gaps)
     log_prompts: bool = False  # debug: store prompt/response text in run_events (owner-only diagnostics)
+
+    # LangGraph workflow (M7, D-011 toggles). The core path works with every ENABLE_* toggle off (AC 46).
+    enable_parallel: bool = True  # Send fan-out per source / per region x indicator; off -> one sequential node
+    enable_replay: bool = True  # history, replay and fork from checkpoints (M7b)
+    enable_draft_tools: bool = True  # let the model call the controlled tools while drafting (when it supports tools)
+    segment_budget_s: float = Field(240.0, gt=0)  # wall-clock budget of one run segment (< FUNCTION_MAX_DURATION_S)
+    segment_safety_margin_s: float = Field(20.0, ge=0)  # SEGMENT_BUDGET_S + this must stay below maxDuration
+    # Longest one node may take (an LLM call with its retries); a segment does not start another step when
+    # elapsed + MAX_NODE_S would exceed SEGMENT_BUDGET_S. Default: LLM_TIMEOUT_S x (LLM_MAX_RETRIES + 1) + 10.
+    max_node_s: float | None = Field(None, gt=0)
+    run_lease_margin_s: float = Field(30.0, gt=0)  # run lease = SEGMENT_BUDGET_S + this (expires if a run dies)
+    history_limit: int = Field(100, ge=1)  # checkpoints listed in the History tab
+    graph_recursion_limit: int = Field(60, ge=10)  # LangGraph super-steps per invocation
 
     cron_secret: SecretStr = SecretStr("")
 
@@ -190,6 +209,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"SSE_DIAG_TICKS * SSE_DIAG_INTERVAL_S must be below {SSE_DIAG_MAX_TOTAL_S:g} s"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _segment_within_max_duration(self) -> "Settings":
+        """Reject a run-segment budget that would not end before the serverless function is killed."""
+        if self.segment_budget_s + self.segment_safety_margin_s >= FUNCTION_MAX_DURATION_S:
+            raise ValueError(f"SEGMENT_BUDGET_S + SEGMENT_SAFETY_MARGIN_S must be below {FUNCTION_MAX_DURATION_S:g} s")
+        if self.max_node_s is None:
+            self.max_node_s = self.llm_timeout_s * (self.llm_max_retries + 1) + MAX_NODE_EXTRA_S
+        if self.max_node_s >= self.segment_budget_s:
+            raise ValueError("MAX_NODE_S must be below SEGMENT_BUDGET_S (a segment must fit at least one long node)")
         return self
 
     @property

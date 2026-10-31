@@ -249,21 +249,32 @@ def _error_message(call_id: str, name: str, text: str) -> ToolMessage:
     return ToolMessage(content=text, tool_call_id=call_id, name=name, status="error")
 
 
+def _calls_final(reply: AIMessage, final: str | None) -> bool:
+    """True when the reply calls the final-answer schema (well-formed or malformed)."""
+    return final is not None and any(c.get("name") == final for c in [*reply.tool_calls, *reply.invalid_tool_calls])
+
+
 def run_tool_loop(model: BaseChatModel, tools: Sequence[BaseTool], messages: Sequence[BaseMessage],
-                  settings: Settings, config: RunnableConfig | None = None) -> list[BaseMessage]:
+                  settings: Settings, config: RunnableConfig | None = None, *,
+                  final_schema: type[BaseModel] | None = None) -> list[BaseMessage]:
     """Let the model call tools until it answers without tool calls, for at most LLM_MAX_TOOL_STEPS turns.
 
     Returns the whole conversation. Unknown tools and malformed tool-call arguments are answered with an
     error ToolMessage so the model can correct itself. If the step budget runs out, the last message is a
-    ToolMessage (callers treat that as "no final answer").
+    ToolMessage (callers treat that as "no final answer"). With `final_schema` (a Pydantic class offered to
+    the model as one more tool), a reply that calls it ends the loop unexecuted: its arguments are the final
+    answer, which the caller parses (other tool calls in that same reply are not run).
     """
-    bound = model.bind_tools(list(tools))
+    final = final_schema.__name__ if final_schema is not None else None
+    bound = model.bind_tools([*tools, *([final_schema] if final_schema is not None else [])])
     by_name = {t.name: t for t in tools}
     msgs = list(messages)
     for _ in range(settings.llm_max_tool_steps):
         reply = bound.invoke(msgs, config=config)
         msgs.append(reply)
         if not isinstance(reply, AIMessage) or not (reply.tool_calls or reply.invalid_tool_calls):
+            break
+        if _calls_final(reply, final):
             break
         for call in reply.tool_calls:
             t = by_name.get(call["name"])

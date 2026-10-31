@@ -14,7 +14,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from statbrief.domain.dataset import ColumnMapping, DatasetRef, ValidationReport
-from statbrief.domain.observation import Observation
+from statbrief.domain.observation import ApiProvenance, Observation
 
 # File status after a mapping is (re)saved: validation and normalization must be redone.
 MAPPED_STATUS = "mapped"
@@ -74,6 +74,65 @@ class ReportRepo:
         with self.pool.connection() as c:
             return c.execute("SELECT * FROM reports WHERE user_id = %s ORDER BY last_activity_at DESC, id",
                              (user_id,)).fetchall()
+
+    def set_params(self, user_id: str, report_id: str, params: dict[str, Any]) -> None:
+        """Store the run parameters (JSON) of the user's report; PermissionError for other users' reports."""
+        with self.pool.connection() as c:
+            row = c.execute("UPDATE reports SET params = %s, last_activity_at = now() WHERE id = %s AND user_id = %s "
+                            "RETURNING id", (Jsonb(params), _uuid(report_id), user_id)).fetchone()
+        if row is None:
+            raise PermissionError("report not owned by user")
+
+    def get_params(self, user_id: str, report_id: str) -> dict[str, Any] | None:
+        """The stored run parameters of the user's report, or None."""
+        row = self.get(user_id, report_id)
+        return row["params"] if row else None
+
+    def set_pending_resume(self, user_id: str, report_id: str, payload: Any) -> None:
+        """Queue a validated resume answer for the next run segment (replaces an earlier one)."""
+        with self.pool.connection() as c:
+            row = c.execute("UPDATE reports SET pending_resume = %s WHERE id = %s AND user_id = %s RETURNING id",
+                            (Jsonb(payload), _uuid(report_id), user_id)).fetchone()
+        if row is None:
+            raise PermissionError("report not owned by user")
+
+    def take_pending_resume(self, user_id: str, report_id: str) -> Any | None:
+        """Return and clear the queued resume answer atomically (None when there is none)."""
+        rid = _uuid(report_id)
+        if rid is None:
+            return None
+        with self.pool.connection() as c:
+            row = c.execute(
+                "UPDATE reports r SET pending_resume = NULL FROM (SELECT id, pending_resume FROM reports "
+                "WHERE id = %s AND user_id = %s FOR UPDATE) old WHERE r.id = old.id RETURNING old.pending_resume",
+                (rid, user_id)).fetchone()
+        return row["pending_resume"] if row else None
+
+    def acquire_lease(self, user_id: str, report_id: str, token: str, seconds: float) -> bool:
+        """Take the report's run lease for `seconds` when it is free or expired; True when this caller won.
+
+        One atomic UPDATE (safe through a transaction-mode pooler): two concurrent callers cannot both win.
+        """
+        with self.pool.connection() as c:
+            row = c.execute(
+                "UPDATE reports SET run_lease_token = %s, run_lease_until = now() + make_interval(secs => %s) "
+                "WHERE id = %s AND user_id = %s AND (run_lease_until IS NULL OR run_lease_until < now()) "
+                "RETURNING id", (token, seconds, _uuid(report_id), user_id)).fetchone()
+        return row is not None
+
+    def renew_lease(self, report_id: str, token: str, seconds: float) -> bool:
+        """Extend the lease held with `token`; False when it was lost (expired and taken by someone else)."""
+        with self.pool.connection() as c:
+            row = c.execute("UPDATE reports SET run_lease_until = now() + make_interval(secs => %s) "
+                            "WHERE id = %s AND run_lease_token = %s RETURNING id",
+                            (seconds, _uuid(report_id), token)).fetchone()
+        return row is not None
+
+    def release_lease(self, report_id: str, token: str) -> None:
+        """Release the lease if `token` still holds it (a no-op for anyone else)."""
+        with self.pool.connection() as c:
+            c.execute("UPDATE reports SET run_lease_token = NULL, run_lease_until = NULL "
+                      "WHERE id = %s AND run_lease_token = %s", (_uuid(report_id), token))
 
     def touch(self, user_id: str, report_id: str) -> None:
         """Record activity (drives retention, D-009); no-op for reports the user does not own."""
@@ -335,12 +394,46 @@ class ObservationRepo:
                           Jsonb(o.model_dump(mode="json"))) for o in observations])
         return len(observations)
 
+    def upsert_api_observations(self, user_id: str, report_id: str, observations: list[Observation]) -> int:
+        """Store public-API observations of the user's report (rows without a file); returns how many.
+
+        An API row with the same obs_id is replaced (the per-report API cache makes a re-fetch identical); a row
+        of an uploaded file is never overwritten. PermissionError unless the user owns the report; ValueError
+        for an observation that does not come from an API.
+        """
+        if any(not isinstance(o.provenance, ApiProvenance) for o in observations):
+            raise ValueError("only API observations can be stored without a file")
+        with self.pool.connection() as c, c.transaction():
+            if _uuid(report_id) is None or not _owns_report(c, user_id, report_id):
+                raise PermissionError("report not owned by user")
+            if observations:
+                with c.cursor() as cur:
+                    cur.executemany(
+                        "INSERT INTO observations (report_id, obs_id, file_id, user_id, indicator_code, region_code, "
+                        "period, payload) VALUES (%s, %s, NULL, %s, %s, %s, %s, %s) "
+                        "ON CONFLICT (report_id, obs_id) DO UPDATE SET indicator_code = EXCLUDED.indicator_code, "
+                        "region_code = EXCLUDED.region_code, period = EXCLUDED.period, payload = EXCLUDED.payload "
+                        "WHERE observations.file_id IS NULL",
+                        [(report_id, o.obs_id, user_id, o.indicator_code, o.region_code, o.period,
+                          Jsonb(o.model_dump(mode="json"))) for o in observations])
+        return len(observations)
+
     def list_for_report(self, user_id: str, report_id: str) -> list[Observation]:
         """The user's observations in a report (stable order)."""
         with self.pool.connection() as c:
             rows = c.execute("SELECT payload FROM observations WHERE report_id = %s AND user_id = %s "
                              "ORDER BY indicator_code, region_code, period, obs_id",
                              (_uuid(report_id), user_id)).fetchall()
+        return [Observation.model_validate(r["payload"]) for r in rows]
+
+    def list_for_series(self, user_id: str, report_id: str, indicator_codes: list[str],
+                        region: str) -> list[Observation]:
+        """The user's observations of some indicator codes in one region of a report (stable order)."""
+        with self.pool.connection() as c:
+            rows = c.execute("SELECT payload FROM observations WHERE report_id = %s AND user_id = %s "
+                             "AND indicator_code = ANY(%s) AND region_code = %s "
+                             "ORDER BY indicator_code, region_code, period, obs_id",
+                             (_uuid(report_id), user_id, list(indicator_codes), region)).fetchall()
         return [Observation.model_validate(r["payload"]) for r in rows]
 
 

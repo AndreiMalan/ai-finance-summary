@@ -198,3 +198,29 @@ def test_unexpected_tool_exception_becomes_error_message(monkeypatch):
     monkeypatch.setattr(tools_mod, "compute_metric", boom)
     msg = _call(_tools()["compute_metric"], {"metric_id": "latest:UNEMP_RATE:RO:2024-01"})
     assert msg.content == "error: RuntimeError" and "secret" not in msg.content
+
+
+# --- M7: final-answer schema ends the loop --------------------------------------------------------------------
+
+def test_final_schema_call_ends_the_loop_unexecuted():
+    """With final_schema, a reply calling it ends the loop; earlier tool calls were answered normally."""
+    from statbrief.domain.report import ReportDraft
+    model = ToolFakeListChatModel(responses=[
+        tool_call_message("compute_metric", {"metric_id": "latest:UNEMP_RATE:RO:2024-01"}, call_id="a"),
+        tool_call_message("ReportDraft", {"title": "x"}, call_id="f"),
+        AIMessage(content="never reached"),
+    ])
+    tools = list(_tools().values())
+    msgs = run_tool_loop(model, tools, [HumanMessage(content="?")], make_settings(), final_schema=ReportDraft)
+    assert model.bound_tools[-1] is ReportDraft and len(model.bound_tools) == len(tools) + 1
+    assert [type(m).__name__ for m in msgs] == ["HumanMessage", "AIMessage", "ToolMessage", "AIMessage"]
+    assert msgs[-1].tool_calls[0]["name"] == "ReportDraft"
+
+
+def test_malformed_final_schema_call_also_ends_the_loop():
+    """A malformed ReportDraft call is a (failed) final answer, not a tool to run."""
+    from statbrief.domain.report import ReportDraft
+    model = ToolFakeListChatModel(responses=[invalid_tool_call_message("ReportDraft", "{oops", call_id="f")])
+    msgs = run_tool_loop(model, list(_tools().values()), [HumanMessage(content="?")], make_settings(),
+                         final_schema=ReportDraft)
+    assert len(msgs) == 2 and msgs[-1].invalid_tool_calls

@@ -139,3 +139,63 @@ Rationale: M6 review I1. Common-word headers made ordinary prose ("Total employm
 
 `DailyLLMCap` de-duplicates by `run_id`. A run-events handler that shares the same cap (so it can log a blocked call as `llm_error`) therefore never counts a call twice, and a blocked run stays blocked. Provider-internal retries (`LLM_MAX_RETRIES`) are part of one counted call. A failing cap check (database down) fails closed and is logged as `llm_error` with the exception type.
 Rationale: M6 review I2. An opt-in cap on each call site could be forgotten (uncapped spend) or attached twice (double counting).
+
+## D-035 — One year of look-back before the report window
+2026-10-29 · The analysis reads one year before `period_from`, frequency-aware: the same period one year earlier, which means 12 months, 4 quarters or 1 year (`graph.observations.lookback_start`). This holds for uploads and for API requests alike: `ApiRequest.period_from` is the look-back start. Change metrics therefore have their year-ago base. Metrics and skips are *reported* only when their period lies inside [`period_from`, `period_to`] (`nodes_analyze.report_window_only`), so look-back periods never appear as results. Conflicts in the look-back year are still shown to the user, because they feed the year-ago bases.
+Rationale: M7a review M2. Filtering uploads to the window meant a one-year report had no YoY at all.
+Amendment (M7a re-review I2, m11): the look-back rows feed only point and period-on-period metrics (latest, YoY, MoM, QoQ, and pp changes over one period or one year). Window changes (`abs_change`, `pct_change`, and the window `pp_change`) are computed from the rows inside the report window, so their base is `period_from` (`nodes_analyze.report_metrics`). A pair with rows only in the look-back year is reported as one skip, "no observations in the report window".
+
+## D-036 — One effective row per data point; uploads take precedence over agreeing API values
+2026-10-29 · After conflict resolution, the effective observation set has exactly one row per (indicator, region, period, unit, unit_multiplier) (`graph.observations.collapse_duplicates`). Where values from different sources agree, or differ only within the conflict tolerance, the **upload** row is kept, because the user's data is primary. Otherwise the row with the lowest source key, then the lowest obs id, is kept. The ids of the collapsed rows are recorded as corroborations of the kept row (`ReportState.corroborations`, for export and provenance), so nothing is silently lost.
+
+Consented gap filling adds one row only for a key whose uploaded value is missing or absent. The filled copy (its own `gapfill` id, API provenance) replaces both the missing upload point and the API point it copies. Without consent, an uploaded missing value stays primary.
+
+A "prefer" or "exclude" resolution leaves one row or none. "Keep both" keeps both labelled rows, and metrics touching that period are recorded as skipped ("ambiguous"): they are never averaged or picked.
+Rationale: M7a review C1. Duplicate agreeing rows made M4 skip every metric as ambiguous, with no gate.
+Amendment (M7a re-review I3, AC 22): without gap-fill consent, a linked API series never supplies a period that lies inside the uploaded span of that series (first to last uploaded period, same indicator, region and frequency) and has no upload row (`graph.observations.without_unconsented_gap_fills`). API periods outside the span, including the look-back year, extend the series the user selected and are kept. API rows next to an upload row are used for comparison (conflict detection, corroboration), which never needs consent. With consent, the gap-fill copy described above applies.
+Amendment (M7a re-review I4): skipped metrics, with their reasons and including "keep both" periods, reach the drafting and revise prompts as a capped "NOT COMPUTED" block (`PROMPT_MAX_SKIPS`). They are also part of the review interrupt value (`metric_skips`), so gaps are stated, never filled by the model.
+
+## D-037 — Typed graph state with an allow-listed checkpoint serializer
+2026-10-29 · `ReportState` holds Pydantic models and the frozen dataclasses `DraftAttempt` and `RetrievedPassage`. Every checkpointer is created with `serde=graph.serde.make_serializer()`, a `JsonPlusSerializer` whose `allowed_msgpack_modules` lists exactly the state classes. A test walks every annotation reachable from the state, the sub-graph schemas and the Send payloads, and fails when a class is missing. Without the list, an unlisted class would come back as a plain dict. Interrupt values are plain JSON dicts.
+Rationale: a checkpoint must not instantiate arbitrary classes, and LangGraph 4.3 deprecates unregistered types.
+
+## D-038 — Graph data-flow choices (M7a)
+2026-10-29 ·
+- API observations are stored by `fetch_api` as file-less rows (`ObservationRepo.upsert_api_observations`), which never overwrite upload rows.
+- `mappings` uses the `merge_dicts` reducer, because parallel `parse_file` tasks write it. In `merge_dicts`, a None value deletes a key, which is how stale per-file validation reports are dropped.
+- A resume that changes a file's mapping cannot also resolve that file's issues (D-027: the new mapping deletes the old report). Conflict resolutions that involve the remapped file are cleared.
+- Unit mismatches are acknowledged per mismatch. One that appears later is shown again.
+- An unexpected exception in `validate_normalize` ends in `fail_safe` with a `WorkflowError` that names only the exception type.
+- Draft citations must name a retrieved passage or a source of this report, or verification fails.
+- New state keys (architecture §3): `confirmed_mappings`, `unit_mismatches`, `dropped_sources`, `acknowledged_mismatches`, `corroborations`, `needs_input`, `gate_rounds`, and status `rejected`.
+
+Rationale: M7a implementation and review (M1, M3, M5, M6, M9).
+
+## D-039 — Report run runtime: lease, queued answers bound to interrupts, fork rule, time budget (M7b)
+2026-10-30 ·
+- **Run lease.** One running segment or fork per report. It is a lease on the `reports` row: `run_lease_token` and `run_lease_until` (migration 007).
+  - Acquire: one atomic `UPDATE … WHERE id AND user_id AND (until IS NULL OR until < now()) RETURNING`.
+  - Renew: after every saved checkpoint, sub-graph checkpoints included (a heartbeat inside long steps).
+  - Release: by token in `finally`, including when the event generator is closed.
+  - Duration from each renewal: `FUNCTION_MAX_DURATION_S + RUN_LEASE_MARGIN_S` (330 s), so it outlives the
+    function and expires shortly after a kill. If a client disconnects mid-step, release waits for the
+    generator's finalization after that step (or expiry).
+
+  Session advisory locks are not used: through Neon's transaction-mode pooler they lose mutual exclusion and leak (M7b review C1). A dead instance's lease expires by itself.
+- **Queued answers bound to their interrupt.** `POST /resume` takes `{interrupt_id, payload}`.
+  - The `interrupt` SSE event carries `interrupt_id`.
+  - A mismatch with the pending interrupt answers 409 ("this step changed, reload").
+  - The answer is stored with its id in `reports.pending_resume`. A segment applies it only if that interrupt is still pending, and drops it otherwise.
+  - A fork drops any queued answer.
+
+  This means a stale tab can never approve a later round (review I1). EventSource is GET-only, so answers are queued and the next GET segment resumes with them. Run parameters live in `reports.params`.
+- **Fork rule.** Only an allow-list of safe resume points is listed and forkable: before analysis (`analyze_dispatch`), before retrieval, before drafting and before the review (`FORK_POINTS`); everything else is refused with 400. `update_state` does not carry `Send` packets, and the fan-in checkpoint (`aggregate_metrics`) was last written by Send tasks, so forks there leave a dead branch (review I2, I2b). A fork takes the lease, then validates, then consumes one `RUNS_PER_HOUR` slot (429 leaves the report unchanged), then forks and drops the queued answer (I6).
+- **Canonical report id.** Each route resolves the report row once and uses `str(row["id"])` for `thread_id`, the lease and every repo call. Another spelling of the UUID reaches the same thread, and a non-UUID is 404 (review I3).
+- **Time budget.**
+  - The budget is checked only right after a saved top-level checkpoint that is newer than the segment's start: no new step starts once `elapsed + MAX_NODE_S > SEGMENT_BUDGET_S`.
+  - Every segment persists at least one step. Stopping right after an `updates` chunk would drop the step being saved, and a segment that always stops there never progresses.
+  - Settings validate `MAX_NODE_S < SEGMENT_BUDGET_S` and `SEGMENT_BUDGET_S + SEGMENT_SAFETY_MARGIN_S < 300` (the margin is the setup and teardown reserve).
+  - A top-level sub-graph step (drafting with revisions, ingestion) can still exceed `MAX_NODE_S`. If it is killed, only the work since the last saved checkpoint (sub-graph checkpoints included) is lost, and the next segment resumes there (review I4, I7).
+- **Model failures** (`MAX_MODEL_RETRIES`, Task 10) route to `fail_safe`. A database failure outside `validate_normalize` ends the segment with an `error` event and a `segment_error` row in run_events (exception type only). It is not written to the graph state, because `update_state` would fork the thread.
+
+Rationale: M7b review C1, I1–I4 and m2–m5. The serverless runtime (Vercel functions with Neon's pooler) admits no session state, and every state transition must be checkpointed before a request ends.

@@ -166,3 +166,16 @@ def test_user_named_columns_and_dataset_summary_fenced():
 def test_title_rule_allows_years_and_periods():
     """Review M9: years and periods may appear in the title (the verifier does not treat them as numbers)."""
     assert "except years and periods" in " ".join(SYSTEM_RULES.split())
+
+
+def test_metric_skips_block_is_compact_sorted_and_capped():
+    """M7a re-review I4: skipped metrics reach the prompt as 'not computed' lines, capped by PROMPT_MAX_SKIPS."""
+    from statbrief.domain.metrics import MetricSkip
+    skips = [MetricSkip(kind="yoy", indicator="UNEMP_RATE", region="RO", period="2024-01",
+                        reason="ambiguous: 2 observations for 2024-01"),
+             MetricSkip(kind="mom", indicator="HICP_YOY", region="RO", period=None, reason="no base")]
+    ctx = _context(skips=skips, settings=make_settings(prompt_max_skips=1, significance_rate_pp=0.1))
+    assert ctx["metric_skips"].splitlines() == ["- mom | HICP_YOY | RO | - | no base",
+                                                "- (1 more skipped metrics not shown)"]
+    assert _context()["metric_skips"] == NONE
+    assert "NOT COMPUTED" in _text(DRAFT_PROMPT, ctx)

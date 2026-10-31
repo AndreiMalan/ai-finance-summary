@@ -1,0 +1,76 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	validate_normalize(validate_normalize)
+	resolve_gate(resolve_gate)
+	analyze_dispatch(analyze_dispatch)
+	analyze_one(analyze_one)
+	analyze_all(analyze_all)
+	aggregate_metrics(aggregate_metrics)
+	flag_significant(flag_significant)
+	human_review(human_review)
+	export(export)
+	fail_safe(fail_safe)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> ingestion\3aselect_sources;
+	aggregate_metrics --> flag_significant;
+	analyze_all --> aggregate_metrics;
+	analyze_dispatch -.-> analyze_all;
+	analyze_dispatch -.-> analyze_one;
+	analyze_one --> aggregate_metrics;
+	drafting\3a__end__ -.-> fail_safe;
+	drafting\3a__end__ -.-> human_review;
+	flag_significant --> retrieval\3abuild_queries;
+	human_review -.-> __end__;
+	human_review -.-> drafting\3a__start__;
+	human_review -.-> export;
+	ingestion\3a__end__ --> validate_normalize;
+	resolve_gate --> validate_normalize;
+	retrieval\3aretrieve_context --> drafting\3a__start__;
+	validate_normalize -.-> analyze_dispatch;
+	validate_normalize -.-> fail_safe;
+	validate_normalize -.-> resolve_gate;
+	export --> __end__;
+	fail_safe --> __end__;
+	subgraph ingestion
+	ingestion\3aselect_sources(select_sources)
+	ingestion\3afetch_api(fetch_api)
+	ingestion\3aparse_file(parse_file)
+	ingestion\3aingest_all(ingest_all)
+	ingestion\3a__end__(<p>__end__</p>)
+	ingestion\3aselect_sources -.-> ingestion\3a__end__;
+	ingestion\3aselect_sources -.-> ingestion\3afetch_api;
+	ingestion\3aselect_sources -.-> ingestion\3aingest_all;
+	ingestion\3aselect_sources -.-> ingestion\3aparse_file;
+	ingestion\3afetch_api --> ingestion\3a__end__;
+	ingestion\3aingest_all --> ingestion\3a__end__;
+	ingestion\3aparse_file --> ingestion\3a__end__;
+	end
+	subgraph retrieval
+	retrieval\3abuild_queries(build_queries)
+	retrieval\3aretrieve_context(retrieve_context)
+	retrieval\3abuild_queries --> retrieval\3aretrieve_context;
+	end
+	subgraph drafting
+	drafting\3a__start__(<p>__start__</p>)
+	drafting\3adraft(draft)
+	drafting\3averify_claims(verify_claims)
+	drafting\3arevise(revise)
+	drafting\3a__end__(<p>__end__</p>)
+	drafting\3a__start__ --> drafting\3adraft;
+	drafting\3adraft -. &nbsp;fail_safe&nbsp; .-> drafting\3a__end__;
+	drafting\3adraft -. &nbsp;verify&nbsp; .-> drafting\3averify_claims;
+	drafting\3arevise -. &nbsp;fail_safe&nbsp; .-> drafting\3a__end__;
+	drafting\3arevise -. &nbsp;verify&nbsp; .-> drafting\3averify_claims;
+	drafting\3averify_claims -. &nbsp;fail_safe&nbsp; .-> drafting\3a__end__;
+	drafting\3averify_claims -.-> drafting\3arevise;
+	drafting\3adraft -. &nbsp;retry&nbsp; .-> drafting\3adraft;
+	drafting\3arevise -. &nbsp;retry&nbsp; .-> drafting\3arevise;
+	end
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
