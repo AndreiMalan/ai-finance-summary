@@ -36,7 +36,7 @@ Phases: `implementing` → `reviewing` → `fixing` → `approved` → (next tas
 | M2 final-review fixes | D:/AI_Finance_summary | m2-ingestion | 4e0deb5 | ✅ merged |
 | M3 API sources | D:/AI_Finance_summary-m3 | m3-api-sources | 4e0deb5 | ✅ merged to main (712 tests on merged main) |
 | M5 RAG | D:/AI_Finance_summary-m5 | m5-rag | 4e0deb5 | ✅ merged to main |
-| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 45f5781 | ✅ tasks 1–4 merged; 🔄 part 2 (export wiring, deploy, concepts PDF) running |
+| M9 early (tasks 1–4) | D:/AI_Finance_summary-m9 | m9-finish | 45f5781 | ✅ tasks 1–4 merged; 🔄 part 2 done (58b3cbc, 1321 tests) — in review |
 | M8a UI wizard 1–4 | D:/AI_Finance_summary-m8 | m8-ui | 2efdd3d (m7-graph + main, migration 007_report_run) | 🔄 M8a approved 8/10; fixes + M8b running |
 | M7 LangGraph | D:/AI_Finance_summary-m7 | m7-graph | f81aa17 | 🔄 M7a developer running |
 | M6 LLM layer | D:/AI_Finance_summary-m6 | m6-llm | 7d53991 | ✅ merged to main (1045 tests) |
